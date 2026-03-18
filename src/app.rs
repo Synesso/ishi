@@ -462,6 +462,7 @@ impl<A: LinearApi> App<A> {
         self.selected = 0;
     }
 
+    #[allow(dead_code)]
     pub fn start_filter(&mut self) {
         self.start_column_filter(SortColumn::Title);
     }
