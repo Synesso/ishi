@@ -17,6 +17,7 @@ pub const KEYBINDINGS: &[(&str, &str)] = &[
     ("g", "Go to top"),
     ("G", "Go to bottom"),
     ("Enter", "Select / confirm"),
+    ("f / b", "Foreground/background run mode (detail)"),
     ("Esc", "Back / dismiss"),
     ("/", "Search"),
     ("s", "Sort by column"),

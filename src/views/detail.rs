@@ -223,6 +223,14 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
             Span::styled("g", key_style),
             Span::raw("ithub PR"),
         ])
+    } else if app.awaiting_thread_run_mode {
+        Line::from(vec![
+            Span::raw("run thread: "),
+            Span::styled("f", key_style),
+            Span::raw("oreground  "),
+            Span::styled("b", key_style),
+            Span::raw("ackground"),
+        ])
     } else if app.detail_section == DetailSection::Threads {
         let mut spans = vec![Span::styled("Esc", key_style), Span::raw(" back")];
         if app.detail_threads.len() > 1 {
@@ -234,7 +242,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
         }
         spans.push(Span::raw("  "));
         spans.push(Span::styled("Enter", key_style));
-        spans.push(Span::raw(" run in bg  "));
+        spans.push(Span::raw(" choose run mode  "));
         spans.push(Span::styled("a", key_style));
         spans.push(Span::raw(" new thread"));
         Line::from(spans)

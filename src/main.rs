@@ -57,6 +57,19 @@ fn launch_background_thread_run(issue: &api::types::Issue, thread_id: &str) -> R
     Ok(())
 }
 
+/// Continue an existing thread in the foreground (interactive) path.
+fn continue_thread_in_foreground(thread_id: &str) -> Result<()> {
+    let state_path = amp::state::state_path()?;
+    let state = amp::state::State::load(&state_path)?;
+    let workspace = state
+        .workspace_for(thread_id)
+        .ok_or_else(|| anyhow::anyhow!("no workspace recorded for thread {}", thread_id))?;
+    let workspace_path = Path::new(workspace);
+    let args = ["threads", "continue", thread_id];
+    let _ = suspend::run_external_command("amp", &args, workspace_path)?;
+    Ok(())
+}
+
 fn load_threads_for_issue(app: &mut App<impl LinearApi>, identifier: &str) {
     let state_path = match amp::state::state_path() {
         Ok(p) => p,
@@ -362,6 +375,36 @@ async fn main() -> Result<()> {
                     }
                     _ => {}
                 }
+            } else if app.awaiting_thread_run_mode {
+                app.awaiting_thread_run_mode = false;
+                match key.code {
+                    KeyCode::Char('f') => {
+                        if let Some(thread) = app.selected_thread() {
+                            let thread_id = thread.id.clone();
+                            if let Err(err) = continue_thread_in_foreground(&thread_id) {
+                                app.error = Some(app::AppError::new(format!(
+                                    "Failed to run thread in foreground: {err}"
+                                )));
+                            } else {
+                                terminal.clear()?;
+                                refresh_all(&mut app).await;
+                            }
+                        }
+                    }
+                    KeyCode::Char('b') => {
+                        if let (Some(thread), Some(issue)) =
+                            (app.selected_thread(), app.selected_issue())
+                        {
+                            let thread_id = thread.id.clone();
+                            if let Err(err) = launch_background_thread_run(issue, &thread_id) {
+                                app.error = Some(app::AppError::new(format!(
+                                    "Failed to launch background run: {err}"
+                                )));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
             } else if app.awaiting_sort {
                 app.awaiting_sort = false;
                 match key.code {
@@ -462,17 +505,8 @@ async fn main() -> Result<()> {
                             keys::Action::MoveDown => app.thread_move_down(),
                             keys::Action::MoveUp => app.thread_move_up(),
                             keys::Action::Select => {
-                                if let (Some(thread), Some(issue)) =
-                                    (app.selected_thread(), app.selected_issue())
-                                {
-                                    let thread_id = thread.id.clone();
-                                    if let Err(err) =
-                                        launch_background_thread_run(issue, &thread_id)
-                                    {
-                                        app.error = Some(app::AppError::new(format!(
-                                            "Failed to launch background run: {err}"
-                                        )));
-                                    }
+                                if app.selected_thread().is_some() {
+                                    app.awaiting_thread_run_mode = true;
                                 }
                             }
                             keys::Action::Tab => app.focus_body(),

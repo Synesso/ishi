@@ -271,6 +271,7 @@ pub struct App<A: LinearApi> {
     pub awaiting_filter: bool,
     pub awaiting_sort: bool,
     pub awaiting_open: bool,
+    pub awaiting_thread_run_mode: bool,
     pub sort: Option<(SortColumn, SortDirection)>,
     pub search: Option<String>,
     pub search_input: String,
@@ -310,6 +311,7 @@ impl<A: LinearApi> App<A> {
             awaiting_filter: false,
             awaiting_sort: false,
             awaiting_open: false,
+            awaiting_thread_run_mode: false,
             sort: None,
             search: None,
             search_input: String::new(),
@@ -2128,6 +2130,12 @@ mod tests {
     fn awaiting_open_defaults_to_false() {
         let app = app_with_issues();
         assert!(!app.awaiting_open);
+    }
+
+    #[test]
+    fn awaiting_thread_run_mode_defaults_to_false() {
+        let app = app_with_issues();
+        assert!(!app.awaiting_thread_run_mode);
     }
 
     #[test]
