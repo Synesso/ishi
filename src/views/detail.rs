@@ -230,27 +230,36 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
             Span::raw("ithub PR"),
         ])
     } else if app.detail_section == DetailSection::Threads {
-        Line::from(vec![
-            Span::styled("Esc", key_style),
-            Span::raw(" back  "),
-            Span::styled("j", key_style),
-            Span::raw("/"),
-            Span::styled("k", key_style),
-            Span::raw(" navigate  "),
-            Span::styled("Enter", key_style),
-            Span::raw(" continue  "),
-            Span::styled("a", key_style),
-            Span::raw(" new thread"),
-        ])
-    } else {
         let mut spans = vec![
             Span::styled("Esc", key_style),
-            Span::raw(" back  "),
-            Span::styled("j", key_style),
-            Span::raw("/"),
-            Span::styled("k", key_style),
-            Span::raw(" scroll"),
+            Span::raw(" back"),
         ];
+        if app.detail_threads.len() > 1 {
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled("j", key_style));
+            spans.push(Span::raw("/"));
+            spans.push(Span::styled("k", key_style));
+            spans.push(Span::raw(" navigate"));
+        }
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled("Enter", key_style));
+        spans.push(Span::raw(" continue  "));
+        spans.push(Span::styled("a", key_style));
+        spans.push(Span::raw(" new thread"));
+        Line::from(spans)
+    } else {
+        let can_scroll = content_lines > inner_height;
+        let mut spans = vec![
+            Span::styled("Esc", key_style),
+            Span::raw(" back"),
+        ];
+        if can_scroll {
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled("j", key_style));
+            spans.push(Span::raw("/"));
+            spans.push(Span::styled("k", key_style));
+            spans.push(Span::raw(" scroll"));
+        }
         if !app.detail_threads.is_empty() {
             spans.push(Span::raw("  "));
             spans.push(Span::styled("Tab", key_style));
@@ -269,12 +278,19 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
         let extra_lines: u16 = 1;
         let content_lines = picker.options.len() as u16 + extra_lines;
         let picker_height = (content_lines + 2).min(area.height.saturating_sub(4));
+        let input_width = if picker.typing {
+            // " " + input + "▏" + "  tab to complete"
+            picker.input.len() as u16 + 21
+        } else {
+            0
+        };
         let picker_width = picker
             .options
             .iter()
             .map(|s| s.len() as u16)
             .max()
             .unwrap_or(20)
+            .max(input_width)
             .max(20)
             + 4;
         let picker_width = picker_width.min(area.width.saturating_sub(4));
@@ -290,7 +306,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
             .iter()
             .enumerate()
             .map(|(i, ws)| {
-                let style = if !picker.typing && i == picker.selected {
+                let style = if i == picker.selected {
                     Style::default().add_modifier(Modifier::REVERSED)
                 } else {
                     Style::default()
@@ -301,9 +317,10 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
 
         if picker.typing {
             lines.push(Line::from(vec![
-                Span::raw(" /"),
+                Span::raw(" "),
                 Span::styled(&picker.input, Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw("▏"),
+                Span::styled("  tab to complete", Style::default().fg(Color::DarkGray)),
             ]));
         } else {
             let key_style = Style::default().fg(Color::DarkGray);

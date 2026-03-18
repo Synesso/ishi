@@ -10,7 +10,7 @@ use anyhow::Result;
 use api::client::{LinearApi, LinearClient};
 use app::App;
 use crossterm::{
-    event::{self, Event, KeyCode},
+    event::{self, Event, KeyCode, KeyModifiers},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
@@ -18,6 +18,13 @@ use ratatui::{prelude::CrosstermBackend, Terminal};
 use std::io::stdout;
 use std::path::Path;
 use std::collections::HashSet;
+
+/// Perform a full refresh and reload thread data for the selected issue.
+async fn refresh_all(app: &mut App<impl LinearApi>) {
+    if let Some(id) = app.refresh().await {
+        load_threads_for_issue(app, &id);
+    }
+}
 
 /// Look up the workspace for a thread from the state file, then run
 /// `amp threads continue <thread_id>` in that workspace directory,
@@ -70,22 +77,57 @@ fn open_workspace_picker(app: &mut App<impl LinearApi>) {
         Ok(s) => s,
         Err(_) => return,
     };
-    let workspaces: Vec<String> = state.workspaces().to_vec();
+    let mut workspaces: Vec<String> = state.workspaces().to_vec();
+    if let Ok(pwd) = std::env::current_dir() {
+        let pwd = pwd.to_string_lossy().to_string();
+        workspaces.retain(|w| w != &pwd);
+        workspaces.insert(0, pwd);
+    }
     app.show_workspace_picker(workspaces);
+}
+
+/// Build a context prompt from a Linear issue to seed a new Amp thread.
+fn build_issue_context(issue: &api::types::Issue) -> String {
+    let mut ctx = format!("# {} {}\n", issue.identifier, issue.title);
+    if let Some(url) = &issue.url {
+        ctx.push_str(&format!("{}\n", url));
+    }
+    ctx.push('\n');
+    if let Some(state) = &issue.state {
+        ctx.push_str(&format!("**Status**: {}\n", state.name));
+    }
+    if let Some(project) = &issue.project {
+        ctx.push_str(&format!("**Project**: {}\n", project.name));
+    }
+    if let Some(labels) = &issue.labels {
+        if !labels.nodes.is_empty() {
+            let names: Vec<&str> = labels.nodes.iter().map(|l| l.name.as_str()).collect();
+            ctx.push_str(&format!("**Labels**: {}\n", names.join(", ")));
+        }
+    }
+    if let Some(desc) = &issue.description {
+        if !desc.is_empty() {
+            ctx.push_str(&format!("\n## Description\n\n{}\n", desc));
+        }
+    }
+    ctx
 }
 
 /// Execute the new-thread flow:
 /// 1. Snapshot thread IDs
-/// 2. Suspend TUI and run `amp threads new` in the chosen workspace
+/// 2. Suspend TUI, open `$EDITOR` with pre-filled issue context for the user to
+///    add instructions, then launch `amp` piping the edited context
 /// 3. Diff thread IDs to detect the new thread
 /// 4. If found, save thread link and update workspace history
 fn start_new_thread(
     issue_identifier: &str,
     workspace: &str,
     before_ids: &HashSet<String>,
+    issue_context: Option<&str>,
 ) -> Result<()> {
     let workspace_path = Path::new(workspace);
-    suspend::run_external_command("amp", &["threads", "new"], workspace_path)?;
+
+    suspend::run_with_editor_then_command(workspace_path, issue_context)?;
 
     // Diff thread IDs to find the newly created thread
     let threads_dir = match amp::thread::amp_threads_dir() {
@@ -148,7 +190,7 @@ async fn main() -> Result<()> {
                     KeyCode::Esc => app.dismiss_error(),
                     KeyCode::Char('r') => {
                         app.dismiss_error();
-                        app.refresh().await;
+                        refresh_all(&mut app).await;
                     }
                     KeyCode::Char('q') => app.running = false,
                     _ => {}
@@ -158,6 +200,15 @@ async fn main() -> Result<()> {
                 if is_typing {
                     match key.code {
                         KeyCode::Enter => {
+                            // If the input is empty, adopt the selected option
+                            // as the input path before confirming.
+                            if let Some(ref mut picker) = app.workspace_picker {
+                                if picker.input.is_empty() {
+                                    if let Some(ws) = picker.options.get(picker.selected) {
+                                        picker.input = ws.clone();
+                                    }
+                                }
+                            }
                             let typed_path = app
                                 .workspace_picker
                                 .as_mut()
@@ -166,17 +217,41 @@ async fn main() -> Result<()> {
                                 (typed_path, app.selected_issue())
                             {
                                 let issue_id = issue.identifier.clone();
+                                let context = build_issue_context(issue);
                                 app.workspace_picker = None;
                                 let before_ids = amp::thread::amp_threads_dir()
                                     .map(|d| amp::thread::snapshot_thread_ids(&d))
                                     .unwrap_or_default();
-                                let _ = start_new_thread(&issue_id, &workspace, &before_ids);
-                                load_threads_for_issue(&mut app, &issue_id);
+                                let _ = start_new_thread(&issue_id, &workspace, &before_ids, Some(&context));
+                                terminal.clear()?;
+                                refresh_all(&mut app).await;
                             }
                         }
                         KeyCode::Esc => {
                             if let Some(ref mut picker) = app.workspace_picker {
                                 picker.cancel_typing();
+                            }
+                        }
+                        KeyCode::Tab | KeyCode::BackTab => {
+                            if let Some(ref mut picker) = app.workspace_picker {
+                                picker.tab_complete();
+                            }
+                        }
+                        KeyCode::Down => {
+                            if let Some(ref mut picker) = app.workspace_picker {
+                                picker.move_down();
+                            }
+                        }
+                        KeyCode::Up => {
+                            if let Some(ref mut picker) = app.workspace_picker {
+                                picker.move_up();
+                            }
+                        }
+                        KeyCode::Backspace
+                            if key.modifiers.contains(KeyModifiers::ALT) =>
+                        {
+                            if let Some(ref mut picker) = app.workspace_picker {
+                                picker.delete_path_component();
                             }
                         }
                         KeyCode::Backspace => {
@@ -199,12 +274,14 @@ async fn main() -> Result<()> {
                                 && let Some(workspace) = picker.options.get(picker.selected)
                             {
                                 let issue_id = issue.identifier.clone();
+                                let context = build_issue_context(issue);
                                 let workspace = workspace.clone();
                                 let before_ids = amp::thread::amp_threads_dir()
                                     .map(|d| amp::thread::snapshot_thread_ids(&d))
                                     .unwrap_or_default();
-                                let _ = start_new_thread(&issue_id, &workspace, &before_ids);
-                                load_threads_for_issue(&mut app, &issue_id);
+                                let _ = start_new_thread(&issue_id, &workspace, &before_ids, Some(&context));
+                                terminal.clear()?;
+                                refresh_all(&mut app).await;
                             }
                         }
                         KeyCode::Esc => app.cancel_workspace_picker(),
@@ -359,10 +436,12 @@ async fn main() -> Result<()> {
                                 if let Some(thread) = app.selected_thread() {
                                     let thread_id = thread.id.clone();
                                     let _ = continue_thread(&thread_id);
+                                    terminal.clear()?;
+                                    refresh_all(&mut app).await;
                                 }
                             }
                             keys::Action::Tab => app.focus_body(),
-                            keys::Action::Refresh => app.refresh().await,
+                            keys::Action::Refresh => refresh_all(&mut app).await,
                             keys::Action::NewThread => open_workspace_picker(&mut app),
                             keys::Action::OpenIn => app.awaiting_open = true,
                             keys::Action::Help => app.toggle_help(),
@@ -374,7 +453,7 @@ async fn main() -> Result<()> {
                             keys::Action::MoveDown => app.scroll_detail_down(),
                             keys::Action::MoveUp => app.scroll_detail_up(),
                             keys::Action::Top => app.detail_scroll = 0,
-                            keys::Action::Refresh => app.refresh().await,
+                            keys::Action::Refresh => refresh_all(&mut app).await,
                             keys::Action::Tab => app.focus_threads(),
                             keys::Action::NewThread => open_workspace_picker(&mut app),
                             keys::Action::OpenIn => app.awaiting_open = true,
@@ -407,7 +486,7 @@ async fn main() -> Result<()> {
                     }
                     keys::Action::OrderBy => app.awaiting_sort = true,
                     keys::Action::FilterBy => app.awaiting_filter = true,
-                    keys::Action::Refresh => app.refresh().await,
+                    keys::Action::Refresh => refresh_all(&mut app).await,
                     keys::Action::OpenIn => app.awaiting_open = true,
                     keys::Action::Help => app.toggle_help(),
                     keys::Action::Projects => {

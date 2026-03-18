@@ -39,16 +39,20 @@ pub struct WorkspacePicker {
     pub typing: bool,
     /// Buffer for the path being typed.
     pub input: String,
+    /// The original options before tab completion replaced them.
+    original_options: Vec<String>,
 }
 
 #[allow(dead_code)]
 impl WorkspacePicker {
     pub fn new(options: Vec<String>) -> Self {
+        let original_options = options.clone();
         Self {
             options,
             selected: 0,
             typing: false,
             input: String::new(),
+            original_options,
         }
     }
 
@@ -70,24 +74,107 @@ impl WorkspacePicker {
 
     pub fn start_typing(&mut self) {
         self.typing = true;
-        self.input.clear();
+        self.input = std::env::current_dir()
+            .map(|p| {
+                let mut s = p.to_string_lossy().to_string();
+                if !s.ends_with('/') {
+                    s.push('/');
+                }
+                s
+            })
+            .unwrap_or_default();
     }
 
     pub fn cancel_typing(&mut self) {
         self.typing = false;
         self.input.clear();
+        self.options = self.original_options.clone();
+        self.selected = 0;
+    }
+
+    /// Delete one path component from the end of the input.
+    ///
+    /// Strips trailing slash, then removes back to the previous `/`.
+    /// For example: `/Users/me/projects/` → `/Users/me/`
+    pub fn delete_path_component(&mut self) {
+        // Strip trailing slash so we target the last component.
+        if self.input.ends_with('/') {
+            self.input.pop();
+        }
+        // Remove characters back to the previous `/` (inclusive of everything after it).
+        if let Some(pos) = self.input.rfind('/') {
+            self.input.truncate(pos + 1);
+        } else {
+            self.input.clear();
+        }
+    }
+
+    /// Perform tab completion on the current input.
+    ///
+    /// Lists directories matching the current input prefix and replaces the
+    /// picker's options with the results. The user can then navigate them with
+    /// j/k or arrows and press Enter to select, just like the normal picker.
+    /// If exactly one directory matches, the input is completed immediately and
+    /// the options are populated with its children.
+    pub fn tab_complete(&mut self) {
+        use std::path::Path;
+
+        let base = &self.input;
+        let path = Path::new(base);
+        let (dir, prefix) = if base.ends_with('/') || base.is_empty() {
+            (if base.is_empty() { Path::new(".") } else { path }, "")
+        } else {
+            let parent = path.parent().unwrap_or(Path::new("."));
+            let file_name = path.file_name().and_then(|f| f.to_str()).unwrap_or("");
+            (parent, file_name)
+        };
+
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            let mut matches: Vec<String> = entries
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    e.file_name()
+                        .to_str()
+                        .is_some_and(|name| name.starts_with(prefix))
+                })
+                .filter(|e| e.file_type().is_ok_and(|ft| ft.is_dir()))
+                .map(|e| {
+                    let mut full = dir.join(e.file_name()).to_string_lossy().to_string();
+                    full.push('/');
+                    full
+                })
+                .collect();
+            matches.sort();
+
+            match matches.len() {
+                0 => {} // no matches — do nothing
+                1 => {
+                    // Single match — complete the input, don't change options.
+                    self.input = matches[0].clone();
+                }
+                _ => {
+                    // Multiple matches — show them as selectable options.
+                    self.options = matches;
+                    self.selected = 0;
+                }
+            }
+        }
     }
 
     /// Confirm the typed path. Returns the entered path if non-empty.
+    /// If the input is empty but there's a selected option, returns that instead.
     pub fn confirm_typed_path(&mut self) -> Option<String> {
         self.typing = false;
         let path = self.input.trim().to_string();
-        self.input.clear();
-        if path.is_empty() {
-            None
-        } else {
+        let result = if !path.is_empty() {
             Some(path)
-        }
+        } else {
+            self.options.get(self.selected).cloned()
+        };
+        self.input.clear();
+        self.options = self.original_options.clone();
+        self.selected = 0;
+        result
     }
 }
 
@@ -627,13 +714,17 @@ impl<A: LinearApi> App<A> {
         self.loading = false;
     }
 
-    /// Force-refresh issues from API, bypassing cache.
-    /// Updates the cache with the fresh response.
-    pub async fn refresh(&mut self) {
+    /// Force-refresh all data from API, bypassing caches.
+    /// Re-fetches issues and projects, then returns the identifier of the
+    /// currently selected issue (if any) so callers can reload thread data.
+    pub async fn refresh(&mut self) -> Option<String> {
         self.refreshing = true;
         self.cache.invalidate(CACHE_KEY_MY_ISSUES);
+        self.project_cache.invalidate(CACHE_KEY_PROJECTS);
         self.fetch_and_cache_issues().await;
+        self.fetch_and_cache_projects().await;
         self.refreshing = false;
+        self.context_issue().map(|i| i.identifier.clone())
     }
 
     async fn fetch_and_cache_issues(&mut self) {
@@ -1602,14 +1693,17 @@ mod tests {
 
         picker.start_typing();
         assert!(picker.typing);
-        assert!(picker.input.is_empty());
+        // Input is seeded with PWD as an absolute path with trailing slash.
+        let pwd = std::env::current_dir().unwrap().to_string_lossy().to_string();
+        assert!(picker.input.starts_with(&pwd));
+        assert!(picker.input.ends_with('/'));
     }
 
     #[test]
     fn workspace_picker_cancel_typing() {
         let mut picker = WorkspacePicker::new(vec!["/a".into()]);
         picker.start_typing();
-        picker.input.push_str("/some/path");
+        picker.input.push_str("some/path");
         picker.cancel_typing();
 
         assert!(!picker.typing);
@@ -1620,7 +1714,7 @@ mod tests {
     fn workspace_picker_confirm_typed_path_returns_path() {
         let mut picker = WorkspacePicker::new(vec![]);
         picker.start_typing();
-        picker.input.push_str("/my/workspace");
+        picker.input = "/my/workspace".to_string();
 
         let result = picker.confirm_typed_path();
         assert_eq!(result, Some("/my/workspace".to_string()));
@@ -1632,7 +1726,7 @@ mod tests {
     fn workspace_picker_confirm_typed_path_trims_whitespace() {
         let mut picker = WorkspacePicker::new(vec![]);
         picker.start_typing();
-        picker.input.push_str("  /my/workspace  ");
+        picker.input = "  /my/workspace  ".to_string();
 
         let result = picker.confirm_typed_path();
         assert_eq!(result, Some("/my/workspace".to_string()));
@@ -1641,7 +1735,8 @@ mod tests {
     #[test]
     fn workspace_picker_confirm_empty_path_returns_none() {
         let mut picker = WorkspacePicker::new(vec![]);
-        picker.start_typing();
+        picker.typing = true;
+        picker.input.clear();
 
         let result = picker.confirm_typed_path();
         assert!(result.is_none());
@@ -1651,40 +1746,145 @@ mod tests {
     #[test]
     fn workspace_picker_confirm_whitespace_only_returns_none() {
         let mut picker = WorkspacePicker::new(vec![]);
-        picker.start_typing();
-        picker.input.push_str("   ");
+        picker.typing = true;
+        picker.input = "   ".to_string();
 
         let result = picker.confirm_typed_path();
         assert!(result.is_none());
     }
 
     #[test]
-    fn workspace_picker_typing_does_not_highlight_list() {
+    fn workspace_picker_typing_highlights_selected() {
         let mut picker = WorkspacePicker::new(vec!["/a".into(), "/b".into()]);
         assert!(!picker.typing);
-        // When not typing, selected item is highlighted (tested by selected_workspace)
         assert_eq!(picker.selected_workspace(), Some("/a"));
 
         picker.start_typing();
-        // selected_workspace still returns the same, but the UI won't highlight it
-        // (the typing flag tells the renderer to suppress highlight)
         assert!(picker.typing);
         assert_eq!(picker.selected, 0);
     }
 
     #[test]
-    fn workspace_picker_typing_input_accumulates() {
+    fn workspace_picker_typing_input_editable() {
         let mut picker = WorkspacePicker::new(vec![]);
         picker.start_typing();
-        picker.input.push('/');
-        picker.input.push('h');
-        picker.input.push('o');
-        picker.input.push('m');
-        picker.input.push('e');
-        assert_eq!(picker.input, "/home");
+        let initial = picker.input.clone();
 
+        // User can append characters.
+        picker.input.push_str("subdir");
+        assert!(picker.input.ends_with("subdir"));
+
+        // User can delete characters.
         picker.input.pop();
-        assert_eq!(picker.input, "/hom");
+        assert!(picker.input.ends_with("subdi"));
+
+        // User can clear and type a completely different absolute path.
+        picker.input = "/other/path".to_string();
+        assert_eq!(picker.input, "/other/path");
+        assert_ne!(picker.input, initial);
+    }
+
+    #[test]
+    fn workspace_picker_tab_complete_populates_options() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("alpha")).unwrap();
+        std::fs::create_dir(dir.path().join("beta")).unwrap();
+        // Files should not appear in completions.
+        std::fs::write(dir.path().join("file.txt"), "").unwrap();
+
+        let mut picker = WorkspacePicker::new(vec!["/original".into()]);
+        picker.start_typing();
+        picker.input = format!("{}/", dir.path().display());
+
+        picker.tab_complete();
+        // Options should contain exactly the two subdirectories.
+        assert_eq!(picker.options.len(), 2);
+        assert!(picker.options[0].ends_with("alpha/"));
+        assert!(picker.options[1].ends_with("beta/"));
+        assert_eq!(picker.selected, 0);
+    }
+
+    #[test]
+    fn workspace_picker_tab_complete_single_match_auto_completes() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("only_dir");
+        std::fs::create_dir(&sub).unwrap();
+
+        let mut picker = WorkspacePicker::new(vec!["/original".into()]);
+        picker.start_typing();
+        picker.input = format!("{}/o", dir.path().display());
+
+        picker.tab_complete();
+        // Single match — input should be completed.
+        assert!(
+            picker.input.ends_with("only_dir/"),
+            "input should auto-complete: {}",
+            picker.input
+        );
+        // Options should remain unchanged (not drilled into children).
+        assert_eq!(picker.options, vec!["/original"]);
+    }
+
+    #[test]
+    fn workspace_picker_tab_complete_with_prefix_filters() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("src")).unwrap();
+        std::fs::create_dir(dir.path().join("scripts")).unwrap();
+        std::fs::create_dir(dir.path().join("target")).unwrap();
+
+        let mut picker = WorkspacePicker::new(vec![]);
+        picker.start_typing();
+        picker.input = format!("{}/s", dir.path().display());
+
+        picker.tab_complete();
+        // Should show only "scripts" and "src", not "target".
+        assert_eq!(picker.options.len(), 2);
+        let names: Vec<&str> = picker
+            .options
+            .iter()
+            .map(|o| o.rsplit('/').nth(1).unwrap())
+            .collect();
+        assert!(names.contains(&"scripts"));
+        assert!(names.contains(&"src"));
+    }
+
+    #[test]
+    fn workspace_picker_cancel_typing_restores_original_options() {
+        let original = vec!["/ws1".to_string(), "/ws2".to_string()];
+        let mut picker = WorkspacePicker::new(original.clone());
+        picker.start_typing();
+
+        // Simulate tab completion replacing options.
+        picker.options = vec!["/some/dir/".into()];
+        picker.cancel_typing();
+
+        assert!(!picker.typing);
+        assert_eq!(picker.options, original);
+    }
+
+    #[test]
+    fn workspace_picker_delete_path_component() {
+        let mut picker = WorkspacePicker::new(vec![]);
+        picker.typing = true;
+
+        // Trailing slash: removes the last directory.
+        picker.input = "/Users/me/projects/".to_string();
+        picker.delete_path_component();
+        assert_eq!(picker.input, "/Users/me/");
+
+        // No trailing slash: removes partial text back to previous slash.
+        picker.input = "/Users/me/pro".to_string();
+        picker.delete_path_component();
+        assert_eq!(picker.input, "/Users/me/");
+
+        // Down to root.
+        picker.input = "/Users/".to_string();
+        picker.delete_path_component();
+        assert_eq!(picker.input, "/");
+
+        // At root slash — clears entirely.
+        picker.delete_path_component();
+        assert_eq!(picker.input, "");
     }
 
     #[test]
@@ -1942,7 +2142,9 @@ mod tests {
         assert_eq!(app.issues.len(), 2);
         assert!(app.error.is_none());
 
-        // Now enqueue an error and refresh
+        // Now enqueue errors for both API calls during refresh
+        // (refresh fetches issues and projects)
+        app.api.push_error("connection timed out");
         app.api.push_error("connection timed out");
         app.refresh().await;
 
@@ -2051,6 +2253,75 @@ mod tests {
         let err = anyhow::anyhow!("unexpected server error");
         let app_err = AppError::from_api_error(&err);
         assert!(app_err.message.contains("unexpected server error"));
+    }
+
+    #[tokio::test]
+    async fn refresh_returns_selected_issue_identifier() {
+        let fake = FakeLinearApi::new();
+        fake.push_response(serde_json::json!({
+            "data": { "issues": { "nodes": [
+                { "id": "1", "identifier": "JEM-1", "title": "Alpha" },
+                { "id": "2", "identifier": "JEM-2", "title": "Beta" }
+            ]}}
+        }));
+        let mut app = App::new(fake);
+        app.issues = vec![
+            Issue { id: "1".into(), identifier: "JEM-1".into(), title: "Alpha".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
+            Issue { id: "2".into(), identifier: "JEM-2".into(), title: "Beta".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
+        ];
+        app.selected = 1;
+
+        let result = app.refresh().await;
+        assert_eq!(result, Some("JEM-2".into()));
+    }
+
+    #[tokio::test]
+    async fn refresh_returns_none_when_no_issues() {
+        let fake = FakeLinearApi::new();
+        let mut app = App::new(fake);
+
+        let result = app.refresh().await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn refresh_invalidates_project_cache() {
+        let fake = FakeLinearApi::new();
+        let proj_fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/projects.json")).unwrap();
+        fake.push_response(proj_fixture.clone());
+        let mut app = App::new(fake);
+
+        app.load_projects().await;
+        assert!(app.project_cache.is_fresh(CACHE_KEY_PROJECTS));
+
+        // Enqueue responses for refresh (issues + projects)
+        app.api.push_response(serde_json::json!({"data": { "issues": { "nodes": [] }}}));
+        app.api.push_response(proj_fixture);
+        app.refresh().await;
+
+        // Project cache should be re-populated (fresh) after refresh
+        assert!(app.project_cache.is_fresh(CACHE_KEY_PROJECTS));
+    }
+
+    #[tokio::test]
+    async fn refresh_updates_projects() {
+        let fake = FakeLinearApi::new();
+        let mut app = App::new(fake);
+        app.projects = vec![Project {
+            id: "old".into(), name: "Old Project".into(),
+            state: None, progress: None, lead: None, url: None,
+        }];
+
+        // Enqueue responses for refresh (issues then projects)
+        app.api.push_response(serde_json::json!({"data": { "issues": { "nodes": [] }}}));
+        let proj_fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/projects.json")).unwrap();
+        app.api.push_response(proj_fixture);
+        app.refresh().await;
+
+        assert_eq!(app.projects.len(), 2);
+        assert_eq!(app.projects[0].name, "Alpha Project");
     }
 
     #[tokio::test]
