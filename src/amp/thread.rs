@@ -158,6 +158,43 @@ pub fn load_thread_summaries(
         .collect()
 }
 
+/// Read a single thread by ID from the default Amp threads directory.
+pub fn read_thread(id: &str) -> Result<ThreadSummary> {
+    let threads_dir =
+        amp_threads_dir().ok_or_else(|| anyhow::anyhow!("could not determine Amp threads directory"))?;
+    let path = threads_dir.join(format!("{}.json", id));
+    read_thread_summary(&path)
+}
+
+/// List all thread summaries from the default Amp threads directory.
+///
+/// Scans `~/.local/share/amp/threads/*.json` and parses metadata from each file.
+/// Threads that fail to parse are silently skipped.
+pub fn list_threads() -> Result<Vec<ThreadSummary>> {
+    let threads_dir =
+        amp_threads_dir().ok_or_else(|| anyhow::anyhow!("could not determine Amp threads directory"))?;
+    list_threads_in(&threads_dir)
+}
+
+/// List all thread summaries from a given directory.
+///
+/// Scans `dir/*.json` and parses metadata from each file.
+/// Files that fail to parse are silently skipped.
+pub fn list_threads_in(dir: &Path) -> Result<Vec<ThreadSummary>> {
+    let mut threads = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "json")
+            && let Ok(summary) = read_thread_summary(&path)
+        {
+            threads.push(summary);
+        }
+    }
+    threads.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
+    Ok(threads)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,6 +310,122 @@ mod tests {
             &["T-nonexistent".to_string()],
         );
         assert!(summaries.is_empty());
+    }
+
+    #[test]
+    fn list_threads_in_returns_sorted_by_last_activity_desc() {
+        let dir = tempfile::tempdir().unwrap();
+        let old_thread = r#"{
+            "v": 0,
+            "id": "T-old",
+            "created": 1600000000000,
+            "title": "Old thread",
+            "messages": [{"role": "user"}]
+        }"#;
+        let new_thread = r#"{
+            "v": 0,
+            "id": "T-new",
+            "created": 1700000000000,
+            "title": "New thread",
+            "messages": [{"role": "user"}, {"role": "assistant"}]
+        }"#;
+        let mid_thread = r#"{
+            "v": 0,
+            "id": "T-mid",
+            "created": 1650000000000,
+            "title": "Mid thread",
+            "messages": []
+        }"#;
+        std::fs::write(dir.path().join("T-old.json"), old_thread).unwrap();
+        std::fs::write(dir.path().join("T-new.json"), new_thread).unwrap();
+        std::fs::write(dir.path().join("T-mid.json"), mid_thread).unwrap();
+
+        let threads = list_threads_in(dir.path()).unwrap();
+        assert_eq!(threads.len(), 3);
+        assert_eq!(threads[0].id, "T-new");
+        assert_eq!(threads[1].id, "T-mid");
+        assert_eq!(threads[2].id, "T-old");
+    }
+
+    #[test]
+    fn list_threads_in_skips_invalid_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let valid = r#"{
+            "v": 0,
+            "id": "T-valid",
+            "created": 1700000000000,
+            "messages": []
+        }"#;
+        std::fs::write(dir.path().join("T-valid.json"), valid).unwrap();
+        std::fs::write(dir.path().join("T-bad.json"), "not valid json").unwrap();
+
+        let threads = list_threads_in(dir.path()).unwrap();
+        assert_eq!(threads.len(), 1);
+        assert_eq!(threads[0].id, "T-valid");
+    }
+
+    #[test]
+    fn list_threads_in_ignores_non_json_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let valid = r#"{
+            "v": 0,
+            "id": "T-only",
+            "created": 1700000000000,
+            "messages": []
+        }"#;
+        std::fs::write(dir.path().join("T-only.json"), valid).unwrap();
+        std::fs::write(dir.path().join("notes.txt"), "some notes").unwrap();
+
+        let threads = list_threads_in(dir.path()).unwrap();
+        assert_eq!(threads.len(), 1);
+        assert_eq!(threads[0].id, "T-only");
+    }
+
+    #[test]
+    fn list_threads_in_empty_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let threads = list_threads_in(dir.path()).unwrap();
+        assert!(threads.is_empty());
+    }
+
+    #[test]
+    fn list_threads_in_nonexistent_dir_returns_error() {
+        let result = list_threads_in(Path::new("/nonexistent/dir"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn list_threads_in_with_usage_ledger_sorts_by_last_event() {
+        let dir = tempfile::tempdir().unwrap();
+        // Thread with old creation but recent usage ledger event
+        let active_thread = r#"{
+            "v": 0,
+            "id": "T-active",
+            "created": 1600000000000,
+            "title": "Active old thread",
+            "messages": [{"role": "user"}],
+            "usageLedger": {
+                "events": [
+                    {"timestamp": "2025-12-28T21:21:59.052Z"}
+                ]
+            }
+        }"#;
+        // Thread with recent creation but no ledger
+        let recent_thread = r#"{
+            "v": 0,
+            "id": "T-recent",
+            "created": 1700000000000,
+            "title": "Recent thread",
+            "messages": []
+        }"#;
+        std::fs::write(dir.path().join("T-active.json"), active_thread).unwrap();
+        std::fs::write(dir.path().join("T-recent.json"), recent_thread).unwrap();
+
+        let threads = list_threads_in(dir.path()).unwrap();
+        assert_eq!(threads.len(), 2);
+        // T-active has last_activity from ledger (2025-12-28) > T-recent creation (1700000000000)
+        assert_eq!(threads[0].id, "T-active");
+        assert_eq!(threads[1].id, "T-recent");
     }
 
     #[test]
