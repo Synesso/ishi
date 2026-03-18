@@ -321,11 +321,19 @@ async fn main() -> Result<()> {
                         keys::Action::MoveUp => app.project_issue_move_up(),
                         keys::Action::Top => app.project_issue_top(),
                         keys::Action::Bottom => app.project_issue_bottom(),
+                        keys::Action::Select => {
+                            let id = app.selected_project_issue().map(|i| i.identifier.clone());
+                            app.select_project_issue();
+                            if let Some(id) = id {
+                                load_threads_for_issue(&mut app, &id);
+                            }
+                        }
                         keys::Action::Back => app.back_from_project_detail(),
                         keys::Action::Refresh => {
                             app.load_project_issues().await;
                         }
                         keys::Action::Help => app.toggle_help(),
+                        keys::Action::OpenIn => app.awaiting_open = true,
                         _ => {}
                     }
                 }

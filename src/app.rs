@@ -23,6 +23,13 @@ pub enum View {
     Detail,
 }
 
+/// Tracks which list view the user came from when entering the Detail view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetailOrigin {
+    MyIssues,
+    ProjectDetail,
+}
+
 /// State for the workspace picker modal shown when starting a new Amp thread.
 #[derive(Debug, Clone)]
 pub struct WorkspacePicker {
@@ -152,6 +159,7 @@ pub struct App<A: LinearApi> {
     pub project_cache: ResponseCache<Vec<Project>>,
     pub project_issues: Vec<Issue>,
     pub project_issue_selected: usize,
+    pub detail_origin: DetailOrigin,
 }
 
 impl<A: LinearApi> App<A> {
@@ -188,6 +196,7 @@ impl<A: LinearApi> App<A> {
             project_cache: ResponseCache::new(Duration::from_secs(CACHE_TTL_SECS)),
             project_issues: Vec::new(),
             project_issue_selected: 0,
+            detail_origin: DetailOrigin::MyIssues,
         }
     }
 
@@ -326,11 +335,15 @@ impl<A: LinearApi> App<A> {
             self.detail_scroll = 0;
             self.detail_section = DetailSection::Body;
             self.detail_thread_selected = 0;
+            self.detail_origin = DetailOrigin::MyIssues;
         }
     }
 
     pub fn back_to_list(&mut self) {
-        self.view = View::MyIssues;
+        self.view = match self.detail_origin {
+            DetailOrigin::MyIssues => View::MyIssues,
+            DetailOrigin::ProjectDetail => View::ProjectDetail,
+        };
         self.detail_scroll = 0;
         self.detail_section = DetailSection::Body;
         self.detail_threads.clear();
@@ -338,8 +351,7 @@ impl<A: LinearApi> App<A> {
     }
 
     pub fn selected_issue(&self) -> Option<&Issue> {
-        let issues = self.filtered_issues();
-        issues.get(self.selected).copied()
+        self.context_issue()
     }
 
     pub fn scroll_detail_down(&mut self) {
@@ -400,7 +412,23 @@ impl<A: LinearApi> App<A> {
     }
 
     pub fn selected_issue_url(&self) -> Option<String> {
-        self.selected_issue().and_then(|i| i.url.clone())
+        self.context_issue().and_then(|i| i.url.clone())
+    }
+
+    /// Returns the issue relevant to the current view context.
+    /// In ProjectDetail or Detail-from-project, returns the selected project issue.
+    /// Otherwise, returns the selected my-issues issue.
+    pub fn context_issue(&self) -> Option<&Issue> {
+        match self.view {
+            View::ProjectDetail => self.selected_project_issue(),
+            View::Detail if self.detail_origin == DetailOrigin::ProjectDetail => {
+                self.selected_project_issue()
+            }
+            _ => {
+                let issues = self.filtered_issues();
+                issues.get(self.selected).copied()
+            }
+        }
     }
 
     pub fn switch_to_projects(&mut self) {
@@ -478,6 +506,16 @@ impl<A: LinearApi> App<A> {
 
     pub fn selected_project_issue(&self) -> Option<&Issue> {
         self.project_issues.get(self.project_issue_selected)
+    }
+
+    pub fn select_project_issue(&mut self) {
+        if self.project_issue_selected < self.project_issues.len() {
+            self.view = View::Detail;
+            self.detail_scroll = 0;
+            self.detail_section = DetailSection::Body;
+            self.detail_thread_selected = 0;
+            self.detail_origin = DetailOrigin::ProjectDetail;
+        }
     }
 
     pub fn selected_project_url(&self) -> Option<String> {
@@ -1350,6 +1388,143 @@ mod tests {
         assert_eq!(app.project_issues.len(), 2);
         assert_eq!(app.project_issues[0].identifier, "JEM-10");
         assert_eq!(app.project_issue_selected, 0);
+    }
+
+    fn app_with_project_issues() -> App<FakeLinearApi> {
+        let mut app = app_with_projects();
+        app.view = View::ProjectDetail;
+        app.project_selected = 0;
+        app.project_issues = vec![
+            Issue { id: "10".into(), identifier: "JEM-10".into(), title: "Project Alpha".into(), url: Some("https://linear.app/test/issue/JEM-10".into()), state: None, priority: Some(2.0), project: None, description: Some("Description 10".into()), assignee: None, labels: None, comments: None },
+            Issue { id: "11".into(), identifier: "JEM-11".into(), title: "Project Beta".into(), url: Some("https://linear.app/test/issue/JEM-11".into()), state: None, priority: Some(3.0), project: None, description: None, assignee: None, labels: None, comments: None },
+        ];
+        app
+    }
+
+    #[test]
+    fn select_project_issue_enters_detail_view() {
+        let mut app = app_with_project_issues();
+        app.project_issue_selected = 0;
+        app.select_project_issue();
+        assert!(matches!(app.view, View::Detail));
+        assert_eq!(app.detail_origin, DetailOrigin::ProjectDetail);
+        assert_eq!(app.detail_scroll, 0);
+        assert!(matches!(app.detail_section, DetailSection::Body));
+        assert_eq!(app.detail_thread_selected, 0);
+    }
+
+    #[test]
+    fn select_project_issue_on_empty_does_nothing() {
+        let mut app = app_with_projects();
+        app.view = View::ProjectDetail;
+        app.select_project_issue();
+        assert!(matches!(app.view, View::ProjectDetail));
+    }
+
+    #[test]
+    fn select_project_issue_at_second_item() {
+        let mut app = app_with_project_issues();
+        app.project_issue_selected = 1;
+        app.select_project_issue();
+        assert!(matches!(app.view, View::Detail));
+        assert_eq!(app.detail_origin, DetailOrigin::ProjectDetail);
+    }
+
+    #[test]
+    fn back_to_list_from_project_issue_returns_to_project_detail() {
+        let mut app = app_with_project_issues();
+        app.select_project_issue();
+        assert!(matches!(app.view, View::Detail));
+        app.back_to_list();
+        assert!(matches!(app.view, View::ProjectDetail));
+    }
+
+    #[test]
+    fn back_to_list_from_my_issue_returns_to_my_issues() {
+        let mut app = app_with_issues();
+        app.select_issue();
+        assert!(matches!(app.view, View::Detail));
+        app.back_to_list();
+        assert!(matches!(app.view, View::MyIssues));
+    }
+
+    #[test]
+    fn selected_issue_in_detail_from_project_returns_project_issue() {
+        let mut app = app_with_project_issues();
+        app.project_issue_selected = 1;
+        app.select_project_issue();
+        let issue = app.selected_issue().unwrap();
+        assert_eq!(issue.identifier, "JEM-11");
+    }
+
+    #[test]
+    fn selected_issue_in_detail_from_my_issues_returns_my_issue() {
+        let mut app = app_with_issues();
+        app.selected = 1;
+        app.select_issue();
+        let issue = app.selected_issue().unwrap();
+        assert_eq!(issue.identifier, "JEM-2");
+    }
+
+    #[test]
+    fn selected_issue_url_from_project_detail_view() {
+        let mut app = app_with_project_issues();
+        app.project_issue_selected = 0;
+        assert_eq!(
+            app.selected_issue_url(),
+            Some("https://linear.app/test/issue/JEM-10".into())
+        );
+    }
+
+    #[test]
+    fn selected_issue_url_from_project_issue_detail() {
+        let mut app = app_with_project_issues();
+        app.project_issue_selected = 0;
+        app.select_project_issue();
+        assert_eq!(
+            app.selected_issue_url(),
+            Some("https://linear.app/test/issue/JEM-10".into())
+        );
+    }
+
+    #[test]
+    fn context_issue_in_my_issues_view() {
+        let mut app = app_with_issues();
+        app.selected = 0;
+        let issue = app.context_issue().unwrap();
+        assert_eq!(issue.identifier, "JEM-1");
+    }
+
+    #[test]
+    fn context_issue_in_project_detail_view() {
+        let mut app = app_with_project_issues();
+        app.project_issue_selected = 1;
+        let issue = app.context_issue().unwrap();
+        assert_eq!(issue.identifier, "JEM-11");
+    }
+
+    #[test]
+    fn context_issue_in_detail_from_project() {
+        let mut app = app_with_project_issues();
+        app.project_issue_selected = 0;
+        app.select_project_issue();
+        let issue = app.context_issue().unwrap();
+        assert_eq!(issue.identifier, "JEM-10");
+    }
+
+    #[test]
+    fn detail_origin_defaults_to_my_issues() {
+        let app = App::new(FakeLinearApi::new());
+        assert_eq!(app.detail_origin, DetailOrigin::MyIssues);
+    }
+
+    #[test]
+    fn select_issue_sets_origin_to_my_issues() {
+        let mut app = app_with_issues();
+        // Even if origin was previously ProjectDetail, selecting from MyIssues resets it
+        app.detail_origin = DetailOrigin::ProjectDetail;
+        app.select_issue();
+        assert_eq!(app.detail_origin, DetailOrigin::MyIssues);
     }
 
     #[test]
