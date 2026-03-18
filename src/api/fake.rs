@@ -87,6 +87,13 @@ impl LinearApi for FakeLinearApi {
         let issues: Vec<Issue> = serde_json::from_value(nodes.clone())?;
         Ok(issues)
     }
+
+    async fn update_issue_state(&self, _issue_id: &str, state_name: &str) -> Result<String> {
+        if let Some(err_msg) = self.errors.lock().unwrap().pop_front() {
+            return Err(anyhow::anyhow!("{}", err_msg));
+        }
+        Ok(state_name.to_string())
+    }
 }
 
 #[cfg(test)]

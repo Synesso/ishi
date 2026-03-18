@@ -72,6 +72,32 @@ query {
 }
 "#;
 
+const TEAM_STATES_QUERY: &str = r#"
+query($issueId: String!) {
+  issue(id: $issueId) {
+    team {
+      states {
+        nodes {
+          id
+          name
+          type
+        }
+      }
+    }
+  }
+}
+"#;
+
+const UPDATE_ISSUE_STATE_MUTATION: &str = r#"
+mutation($issueId: String!, $stateId: String!) {
+  issueUpdate(id: $issueId, input: { stateId: $stateId }) {
+    issue {
+      state { name }
+    }
+  }
+}
+"#;
+
 const PROJECT_ISSUES_QUERY: &str = r#"
 query($projectId: String!) {
   project(id: $projectId) {
@@ -118,8 +144,15 @@ pub trait LinearApi: Send + Sync {
         &self,
         project_id: &str,
     ) -> impl std::future::Future<Output = Result<Vec<Issue>>> + Send;
+
+    fn update_issue_state(
+        &self,
+        issue_id: &str,
+        state_name: &str,
+    ) -> impl std::future::Future<Output = Result<String>> + Send;
 }
 
+#[derive(Clone)]
 pub struct LinearClient {
     client: Client,
     api_key: String,
@@ -205,5 +238,28 @@ impl LinearApi for LinearClient {
         let issues: Vec<Issue> =
             serde_json::from_value(resp["data"]["project"]["issues"]["nodes"].clone())?;
         Ok(issues)
+    }
+
+    async fn update_issue_state(&self, issue_id: &str, state_name: &str) -> Result<String> {
+        // First, fetch the team's workflow states for the issue
+        let vars = serde_json::json!({ "issueId": issue_id });
+        let resp = self.query(TEAM_STATES_QUERY, Some(vars)).await?;
+        let states = resp["data"]["issue"]["team"]["states"]["nodes"]
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("failed to fetch workflow states"))?;
+
+        let state_id = states
+            .iter()
+            .find(|s| s["name"].as_str() == Some(state_name))
+            .and_then(|s| s["id"].as_str())
+            .ok_or_else(|| anyhow::anyhow!("state '{}' not found", state_name))?;
+
+        let vars = serde_json::json!({ "issueId": issue_id, "stateId": state_id });
+        let resp = self.query(UPDATE_ISSUE_STATE_MUTATION, Some(vars)).await?;
+        let new_state = resp["data"]["issueUpdate"]["issue"]["state"]["name"]
+            .as_str()
+            .unwrap_or(state_name)
+            .to_string();
+        Ok(new_state)
     }
 }
