@@ -21,6 +21,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
     let header = Row::new(vec![
         Cell::from("ID").style(Style::default().add_modifier(Modifier::BOLD)),
         Cell::from("Title").style(Style::default().add_modifier(Modifier::BOLD)),
+        Cell::from("Project").style(Style::default().add_modifier(Modifier::BOLD)),
         Cell::from("Status").style(Style::default().add_modifier(Modifier::BOLD)),
         Cell::from("Priority").style(Style::default().add_modifier(Modifier::BOLD)),
     ]);
@@ -31,6 +32,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
             Row::new(vec![
                 Cell::from(issue.identifier.as_str()),
                 Cell::from(issue.title.as_str()),
+                Cell::from(issue.project_str()),
                 Cell::from(issue.status_str()),
                 Cell::from(issue.priority_str()),
             ])
@@ -47,6 +49,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         [
             Constraint::Length(10),
             Constraint::Min(30),
+            Constraint::Length(20),
             Constraint::Length(15),
             Constraint::Length(10),
         ],

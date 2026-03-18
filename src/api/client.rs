@@ -20,6 +20,7 @@ query {
         title
         state { name }
         priority
+        project { name }
       }
     }
   }

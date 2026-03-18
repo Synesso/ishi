@@ -111,6 +111,7 @@ mod tests {
                 title: "Alpha task".into(),
                 state: None,
                 priority: Some(2.0),
+                project: None,
             },
             Issue {
                 id: "2".into(),
@@ -118,6 +119,7 @@ mod tests {
                 title: "Beta task".into(),
                 state: None,
                 priority: Some(3.0),
+                project: None,
             },
             Issue {
                 id: "3".into(),
@@ -125,6 +127,7 @@ mod tests {
                 title: "Gamma task".into(),
                 state: None,
                 priority: None,
+                project: None,
             },
         ];
         app

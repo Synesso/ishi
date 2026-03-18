@@ -8,11 +8,21 @@ pub struct Issue {
     pub title: String,
     pub state: Option<IssueState>,
     pub priority: Option<f64>,
+    pub project: Option<IssueProject>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct IssueProject {
+    pub name: String,
 }
 
 impl Issue {
     pub fn status_str(&self) -> &str {
         self.state.as_ref().map_or("—", |s| s.name.as_str())
+    }
+
+    pub fn project_str(&self) -> &str {
+        self.project.as_ref().map_or("—", |p| p.name.as_str())
     }
 
     pub fn priority_str(&self) -> &str {

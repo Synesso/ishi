@@ -7,14 +7,16 @@
           "identifier": "JEM-1",
           "title": "First issue",
           "state": { "name": "In Progress" },
-          "priority": 2.0
+          "priority": 2.0,
+          "project": { "name": "Alpha" }
         },
         {
           "id": "issue-2",
           "identifier": "JEM-2",
           "title": "Second issue",
           "state": { "name": "Todo" },
-          "priority": 3.0
+          "priority": 3.0,
+          "project": null
         }
       ]
     }
