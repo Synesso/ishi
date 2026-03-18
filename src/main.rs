@@ -50,7 +50,33 @@ async fn main() -> Result<()> {
         if event::poll(std::time::Duration::from_millis(100))?
             && let Event::Key(key) = event::read()?
         {
-            if app.filtering {
+            if app.awaiting_quit {
+                app.awaiting_quit = false;
+                match key.code {
+                    KeyCode::Char('q') => app.running = false,
+                    _ => {}
+                }
+            } else if app.awaiting_sort {
+                app.awaiting_sort = false;
+                match key.code {
+                    KeyCode::Char('i') => app.set_sort(app::SortColumn::Identifier),
+                    KeyCode::Char('t') => app.set_sort(app::SortColumn::Title),
+                    KeyCode::Char('p') => app.set_sort(app::SortColumn::Project),
+                    KeyCode::Char('s') => app.set_sort(app::SortColumn::Status),
+                    KeyCode::Char('r') => app.set_sort(app::SortColumn::Priority),
+                    _ => {}
+                }
+            } else if app.awaiting_filter {
+                app.awaiting_filter = false;
+                match key.code {
+                    KeyCode::Char('i') => app.start_column_filter(app::SortColumn::Identifier),
+                    KeyCode::Char('t') => app.start_column_filter(app::SortColumn::Title),
+                    KeyCode::Char('p') => app.start_column_filter(app::SortColumn::Project),
+                    KeyCode::Char('s') => app.start_column_filter(app::SortColumn::Status),
+                    KeyCode::Char('r') => app.start_column_filter(app::SortColumn::Priority),
+                    _ => {}
+                }
+            } else if app.filtering {
                 match key.code {
                     KeyCode::Enter => app.apply_filter(),
                     KeyCode::Esc => app.cancel_filter(),
@@ -64,13 +90,15 @@ async fn main() -> Result<()> {
                 }
             } else if let Some(action) = keys::map_key(key) {
                 match action {
-                    keys::Action::Quit => app.running = false,
+                    keys::Action::Quit => app.awaiting_quit = true,
                     keys::Action::MoveDown => app.move_down(),
                     keys::Action::MoveUp => app.move_up(),
                     keys::Action::Top => app.top(),
                     keys::Action::Bottom => app.bottom(),
                     keys::Action::Search => app.start_filter(),
                     keys::Action::Back => app.clear_filter(),
+                    keys::Action::OrderBy => app.awaiting_sort = true,
+                    keys::Action::FilterBy => app.awaiting_filter = true,
                     _ => {}
                 }
             }

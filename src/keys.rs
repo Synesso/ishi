@@ -10,12 +10,14 @@ pub enum Action {
     Back,
     Help,
     Search,
+    OrderBy,
+    FilterBy,
 }
 
 pub fn map_key(key: KeyEvent) -> Option<Action> {
     match (key.modifiers, key.code) {
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(Action::Quit),
-        (_, KeyCode::Char('q')) => Some(Action::Quit),
+        (KeyModifiers::NONE, KeyCode::Char('q')) => Some(Action::Quit),
         (_, KeyCode::Char('j')) | (_, KeyCode::Down) => Some(Action::MoveDown),
         (_, KeyCode::Char('k')) | (_, KeyCode::Up) => Some(Action::MoveUp),
         (_, KeyCode::Char('g')) => Some(Action::Top),
@@ -24,6 +26,8 @@ pub fn map_key(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Esc) => Some(Action::Back),
         (_, KeyCode::Char('?')) => Some(Action::Help),
         (_, KeyCode::Char('/')) => Some(Action::Search),
+        (_, KeyCode::Char('o')) => Some(Action::OrderBy),
+        (_, KeyCode::Char('f')) => Some(Action::FilterBy),
         _ => None,
     }
 }
