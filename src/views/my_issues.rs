@@ -12,7 +12,7 @@ use crate::app::{App, SortDirection};
 pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
     let issues = app.filtered_issues();
 
-    let show_bar = app.awaiting_quit || app.filtering || app.filter.is_some()
+    let show_bar = app.refreshing || app.awaiting_quit || app.filtering || app.filter.is_some()
         || app.awaiting_sort || app.awaiting_filter
         || app.searching || app.search.is_some();
     let chunks = if show_bar {
@@ -102,7 +102,13 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
     ];
 
     // Status bar
-    if app.awaiting_quit {
+    if app.refreshing {
+        let line = Line::from(Span::styled(
+            "Refreshing...",
+            Style::default().fg(Color::Yellow),
+        ));
+        frame.render_widget(Paragraph::new(line), chunks[1]);
+    } else if app.awaiting_quit {
         let line = Line::from(vec![
             Span::raw("Press "),
             Span::styled("q", key_style),
@@ -110,7 +116,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         ]);
         frame.render_widget(Paragraph::new(line), chunks[1]);
     } else if app.awaiting_sort {
-        let mut spans = vec![Span::raw("order by: ")];
+        let mut spans = vec![Span::raw("sort by: ")];
         spans.extend(column_hints);
         frame.render_widget(Paragraph::new(Line::from(spans)), chunks[1]);
     } else if app.awaiting_filter {

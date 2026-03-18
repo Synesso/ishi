@@ -2,6 +2,7 @@ mod api;
 mod app;
 mod config;
 mod keys;
+mod suspend;
 mod views;
 
 use anyhow::Result;
@@ -109,6 +110,7 @@ async fn main() -> Result<()> {
                         keys::Action::MoveDown => app.scroll_detail_down(),
                         keys::Action::MoveUp => app.scroll_detail_up(),
                         keys::Action::Top => app.detail_scroll = 0,
+                        keys::Action::Refresh => app.refresh().await,
                         _ => {}
                     }
                 }
@@ -130,6 +132,7 @@ async fn main() -> Result<()> {
                     }
                     keys::Action::OrderBy => app.awaiting_sort = true,
                     keys::Action::FilterBy => app.awaiting_filter = true,
+                    keys::Action::Refresh => app.refresh().await,
                     _ => {}
                 }
             }

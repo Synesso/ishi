@@ -12,6 +12,7 @@ pub enum Action {
     Search,
     OrderBy,
     FilterBy,
+    Refresh,
 }
 
 pub fn map_key(key: KeyEvent) -> Option<Action> {
@@ -26,8 +27,9 @@ pub fn map_key(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Esc) => Some(Action::Back),
         (_, KeyCode::Char('?')) => Some(Action::Help),
         (_, KeyCode::Char('/')) => Some(Action::Search),
-        (_, KeyCode::Char('o')) => Some(Action::OrderBy),
+        (_, KeyCode::Char('s')) => Some(Action::OrderBy),
         (_, KeyCode::Char('f')) => Some(Action::FilterBy),
+        (_, KeyCode::Char('r')) => Some(Action::Refresh),
         _ => None,
     }
 }
@@ -87,6 +89,11 @@ mod tests {
         assert!(matches!(map_key(key(KeyCode::Esc)), Some(Action::Back)));
         assert!(matches!(map_key(key(KeyCode::Char('?'))), Some(Action::Help)));
         assert!(matches!(map_key(key(KeyCode::Char('/'))), Some(Action::Search)));
+    }
+
+    #[test]
+    fn refresh_on_r() {
+        assert!(matches!(map_key(key(KeyCode::Char('r'))), Some(Action::Refresh)));
     }
 
     #[test]

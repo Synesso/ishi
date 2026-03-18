@@ -8,33 +8,63 @@ mkdir -p "$LOG_DIR"
 
 while true; do
   TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-  LOG_FILE="$LOG_DIR/task-$TIMESTAMP.log"
+  PICK_LOG="$LOG_DIR/pick-$TIMESTAMP.log"
 
-  echo "=== $(date) === Checking for tasks..." | tee -a "$LOG_FILE"
+  echo "=== $(date) === Picking next task..."
 
-  RESULT=$(amp --dangerously-allow-all -x "
-You are running in an automated loop. Be thorough but focused.
+  amp --dangerously-allow-all -x "
+List issues in Linear team '$TEAM', project '$PROJECT' with state 'Backlog'.
+Pick the single highest-priority one (or the first if all equal priority).
+Respond with ONLY a single line in this exact format:
+TASK:<issue_identifier>|<issue_title>
+If there are no Backlog issues, respond with exactly: NO_TASKS
+Do not include any other text.
+" 2>&1 | tee "$PICK_LOG"
 
-1. List open issues in Linear team '$TEAM', project '$PROJECT' (state: unstarted or started, exclude done/cancelled).
-2. If there are NO open tasks, respond with exactly: NO_TASKS_REMAINING
-3. If there are tasks, pick ONE task — preferably the highest priority unstarted one.
-4. Assign the task to yourself and set its state to 'In Progress'.
-5. Read the task description carefully. Implement the feature or fix described.
-6. Write tests for your changes. Run the full test suite and ensure all tests pass.
-7. If you discover additional work needed (bugs, missing features, TODOs), create new Linear issues in team '$TEAM' project '$PROJECT' for each.
-8. When implementation is complete and tests pass:
-   a. Use 'jj describe -m \"[TICKET-ID] description of change\"' to describe the change.
-   b. Push to the git remote with 'jj git push'.
-9. Mark the Linear task as 'Done'.
-10. Respond with a summary of what you did.
-" 2>&1 | tee -a "$LOG_FILE")
+  PICK_RESULT=$(cat "$PICK_LOG")
 
-  if echo "$RESULT" | grep -q "NO_TASKS_REMAINING"; then
-    echo "=== $(date) === No tasks remaining. Exiting loop." | tee -a "$LOG_FILE"
+  if echo "$PICK_RESULT" | grep -q "NO_TASKS"; then
+    echo "=== $(date) === No backlog tasks remaining. Exiting loop."
     break
   fi
 
-  echo "=== $(date) === Task completed. Looping..." | tee -a "$LOG_FILE"
+  TASK_LINE=$(echo "$PICK_RESULT" | grep "^TASK:" | head -1)
+  if [ -z "$TASK_LINE" ]; then
+    echo "=== $(date) === Could not parse task from response. Retrying..."
+    sleep 5
+    continue
+  fi
+
+  TASK_ID=$(echo "$TASK_LINE" | sed 's/^TASK:\([^|]*\)|.*/\1/')
+  TASK_TITLE=$(echo "$TASK_LINE" | sed 's/^TASK:[^|]*|//')
+  IMPL_LOG="$LOG_DIR/impl-${TASK_ID}-$TIMESTAMP.log"
+
+  echo "=== $(date) === Working on $TASK_ID: $TASK_TITLE"
+
+  amp --dangerously-allow-all -x "
+You are implementing a task for the ishi project (a Rust TUI app for Linear).
+
+## Your task
+Linear issue: $TASK_ID — $TASK_TITLE
+
+## Instructions
+1. Fetch the full description of Linear issue $TASK_ID (team '$TEAM') and read it carefully.
+2. Set the issue state to 'In Progress'.
+3. Read the existing codebase to understand conventions, structure and patterns.
+4. Implement the feature or fix described in the issue.
+5. Write thorough tests for your changes.
+6. Run the full test suite with 'cargo test' and fix any failures until all tests pass.
+7. Run 'cargo clippy' and fix any warnings.
+8. If you discover additional work needed (bugs, missing features, TODOs), create new Linear issues in team '$TEAM' project '$PROJECT' for each.
+9. When implementation is complete and all tests pass:
+   a. Run: jj describe -m '[$TASK_ID] $TASK_TITLE'
+   b. Run: jj git push
+   c. Run: jj new
+10. Set the Linear issue $TASK_ID state to 'Done'.
+11. Print a brief summary of what you implemented.
+" 2>&1 | tee "$IMPL_LOG"
+
+  echo "=== $(date) === Finished $TASK_ID. Looping..."
   sleep 5
 done
 
