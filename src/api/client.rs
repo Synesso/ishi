@@ -53,7 +53,7 @@ query {
         team {
           projects(
             first: 50
-            filter: { state: { type: { nin: ["completed", "canceled"] } } }
+            filter: { state: { nin: ["completed", "canceled"] } }
             orderBy: updatedAt
           ) {
             nodes {
