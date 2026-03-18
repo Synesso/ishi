@@ -26,17 +26,34 @@ async fn refresh_all(app: &mut App<impl LinearApi>) {
     }
 }
 
-/// Look up the workspace for a thread from the state file, then run
-/// `amp threads continue <thread_id>` in that workspace directory,
-/// suspending and restoring the TUI around the external process.
-fn continue_thread(thread_id: &str) -> Result<()> {
+/// Build the default non-interactive prompt used for background thread runs.
+fn build_continue_prompt(issue: &api::types::Issue) -> String {
+    format!(
+        "Continue work on this Linear issue in the existing thread.\n\n{}",
+        build_issue_context(issue)
+    )
+}
+
+/// Launch a background run for an existing thread and persist its lifecycle
+/// metadata to state.
+fn launch_background_thread_run(issue: &api::types::Issue, thread_id: &str) -> Result<()> {
     let state_path = amp::state::state_path()?;
-    let state = amp::state::State::load(&state_path)?;
+    let mut state = amp::state::State::load(&state_path)?;
     let workspace = state
         .workspace_for(thread_id)
         .ok_or_else(|| anyhow::anyhow!("no workspace recorded for thread {}", thread_id))?;
     let workspace_path = Path::new(workspace);
-    suspend::run_external_command("amp", &["threads", "continue", thread_id], workspace_path)?;
+
+    let prompt = build_continue_prompt(issue);
+    let launched = amp::run::launch_thread_continue_background(
+        thread_id,
+        &issue.identifier,
+        workspace_path,
+        &prompt,
+    )?;
+
+    state.add_session_run(&launched.run_id, launched.run);
+    state.save(&state_path)?;
     Ok(())
 }
 
@@ -222,14 +239,19 @@ async fn main() -> Result<()> {
                                 let before_ids = amp::thread::amp_threads_dir()
                                     .map(|d| amp::thread::snapshot_thread_ids(&d))
                                     .unwrap_or_default();
-                                let _ = start_new_thread(
+                                if let Err(err) = start_new_thread(
                                     &issue_id,
                                     &workspace,
                                     &before_ids,
                                     Some(&context),
-                                );
-                                terminal.clear()?;
-                                refresh_all(&mut app).await;
+                                ) {
+                                    app.error = Some(app::AppError::new(format!(
+                                        "Failed to start thread: {err}"
+                                    )));
+                                } else {
+                                    terminal.clear()?;
+                                    refresh_all(&mut app).await;
+                                }
                             }
                         }
                         KeyCode::Esc => {
@@ -282,14 +304,19 @@ async fn main() -> Result<()> {
                                 let before_ids = amp::thread::amp_threads_dir()
                                     .map(|d| amp::thread::snapshot_thread_ids(&d))
                                     .unwrap_or_default();
-                                let _ = start_new_thread(
+                                if let Err(err) = start_new_thread(
                                     &issue_id,
                                     &workspace,
                                     &before_ids,
                                     Some(&context),
-                                );
-                                terminal.clear()?;
-                                refresh_all(&mut app).await;
+                                ) {
+                                    app.error = Some(app::AppError::new(format!(
+                                        "Failed to start thread: {err}"
+                                    )));
+                                } else {
+                                    terminal.clear()?;
+                                    refresh_all(&mut app).await;
+                                }
                             }
                         }
                         KeyCode::Esc => app.cancel_workspace_picker(),
@@ -435,11 +462,17 @@ async fn main() -> Result<()> {
                             keys::Action::MoveDown => app.thread_move_down(),
                             keys::Action::MoveUp => app.thread_move_up(),
                             keys::Action::Select => {
-                                if let Some(thread) = app.selected_thread() {
+                                if let (Some(thread), Some(issue)) =
+                                    (app.selected_thread(), app.selected_issue())
+                                {
                                     let thread_id = thread.id.clone();
-                                    let _ = continue_thread(&thread_id);
-                                    terminal.clear()?;
-                                    refresh_all(&mut app).await;
+                                    if let Err(err) =
+                                        launch_background_thread_run(issue, &thread_id)
+                                    {
+                                        app.error = Some(app::AppError::new(format!(
+                                            "Failed to launch background run: {err}"
+                                        )));
+                                    }
                                 }
                             }
                             keys::Action::Tab => app.focus_body(),

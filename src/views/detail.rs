@@ -234,7 +234,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
         }
         spans.push(Span::raw("  "));
         spans.push(Span::styled("Enter", key_style));
-        spans.push(Span::raw(" continue  "));
+        spans.push(Span::raw(" run in bg  "));
         spans.push(Span::styled("a", key_style));
         spans.push(Span::raw(" new thread"));
         Line::from(spans)

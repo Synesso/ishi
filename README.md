@@ -6,6 +6,7 @@ A terminal UI client for [Linear](https://linear.app), built with Rust.
 
 - **Vim-style keybindings** — `j`/`k` to navigate, `gg`/`G` to jump, `/` to search, `Enter` to select, `Esc` to go back, `q` to quit
 - **Read-only views** — My Issues, Project, and Issue Detail
+- **Background Amp runs** — launch non-blocking `amp threads continue` sessions from issue detail; run lifecycle metadata is persisted in state
 - **Async** — background API fetches with in-memory caching for snappy navigation
 - **Simple auth** — reads `LINEAR_API_KEY` from env, `~/.config/ishi/config.toml`, or prompts on first run
 
