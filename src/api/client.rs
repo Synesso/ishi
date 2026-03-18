@@ -4,6 +4,14 @@ use serde_json::Value;
 
 const LINEAR_API_URL: &str = "https://api.linear.app/graphql";
 
+pub trait LinearApi: Send + Sync {
+    fn query(
+        &self,
+        query: &str,
+        variables: Option<Value>,
+    ) -> impl std::future::Future<Output = Result<Value>> + Send;
+}
+
 pub struct LinearClient {
     client: Client,
     api_key: String,
@@ -16,8 +24,10 @@ impl LinearClient {
             api_key,
         }
     }
+}
 
-    pub async fn query(&self, query: &str, variables: Option<Value>) -> Result<Value> {
+impl LinearApi for LinearClient {
+    async fn query(&self, query: &str, variables: Option<Value>) -> Result<Value> {
         let mut body = serde_json::json!({ "query": query });
         if let Some(vars) = variables {
             body["variables"] = vars;

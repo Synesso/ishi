@@ -5,6 +5,7 @@ mod keys;
 mod views;
 
 use anyhow::Result;
+use api::client::LinearClient;
 use app::App;
 use crossterm::{
     event::{self, Event},
@@ -17,7 +18,8 @@ use std::io::stdout;
 #[tokio::main]
 async fn main() -> Result<()> {
     let api_key = config::resolve_api_key()?;
-    let mut app = App::new(api_key);
+    let client = LinearClient::new(api_key);
+    let mut app = App::new(client);
 
     // Terminal setup
     enable_raw_mode()?;

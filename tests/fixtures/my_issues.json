@@ -1,0 +1,22 @@
+{
+  "data": {
+    "issues": {
+      "nodes": [
+        {
+          "id": "issue-1",
+          "identifier": "JEM-1",
+          "title": "First issue",
+          "state": { "name": "In Progress" },
+          "priority": 2.0
+        },
+        {
+          "id": "issue-2",
+          "identifier": "JEM-2",
+          "title": "Second issue",
+          "state": { "name": "Todo" },
+          "priority": 3.0
+        }
+      ]
+    }
+  }
+}

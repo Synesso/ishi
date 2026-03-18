@@ -1,0 +1,11 @@
+{
+  "data": {
+    "issue": {
+      "id": "issue-1",
+      "identifier": "JEM-1",
+      "title": "First issue",
+      "state": { "name": "In Progress" },
+      "priority": 2.0
+    }
+  }
+}
