@@ -257,7 +257,10 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
 
     // Workspace picker modal
     if let Some(ref picker) = app.workspace_picker {
-        let picker_height = (picker.options.len() as u16 + 2).min(area.height.saturating_sub(4));
+        // Extra line for the input row when typing, or the hint row
+        let extra_lines: u16 = 1;
+        let content_lines = picker.options.len() as u16 + extra_lines;
+        let picker_height = (content_lines + 2).min(area.height.saturating_sub(4));
         let picker_width = picker
             .options
             .iter()
@@ -274,12 +277,12 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
 
         frame.render_widget(Clear, popup_area);
 
-        let lines: Vec<Line> = picker
+        let mut lines: Vec<Line> = picker
             .options
             .iter()
             .enumerate()
             .map(|(i, ws)| {
-                let style = if i == picker.selected {
+                let style = if !picker.typing && i == picker.selected {
                     Style::default().add_modifier(Modifier::REVERSED)
                 } else {
                     Style::default()
@@ -287,6 +290,17 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
                 Line::from(Span::styled(format!(" {} ", ws), style))
             })
             .collect();
+
+        if picker.typing {
+            lines.push(Line::from(vec![
+                Span::raw(" /"),
+                Span::styled(&picker.input, Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw("▏"),
+            ]));
+        } else {
+            let key_style = Style::default().fg(Color::DarkGray);
+            lines.push(Line::from(Span::styled(" / to type a path", key_style)));
+        }
 
         let popup = Paragraph::new(lines).block(
             Block::default()

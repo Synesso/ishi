@@ -71,9 +71,6 @@ fn open_workspace_picker(app: &mut App<impl LinearApi>) {
         Err(_) => return,
     };
     let workspaces: Vec<String> = state.workspaces().to_vec();
-    if workspaces.is_empty() {
-        return;
-    }
     app.show_workspace_picker(workspaces);
 }
 
@@ -146,33 +143,77 @@ async fn main() -> Result<()> {
             && let Event::Key(key) = event::read()?
         {
             if app.workspace_picker.is_some() {
-                match key.code {
-                    KeyCode::Enter => {
-                        let picker = app.workspace_picker.take();
-                        if let (Some(picker), Some(issue)) = (picker, app.selected_issue())
-                            && let Some(workspace) = picker.options.get(picker.selected)
-                        {
-                            let issue_id = issue.identifier.clone();
-                            let workspace = workspace.clone();
-                            let before_ids = amp::thread::amp_threads_dir()
-                                .map(|d| amp::thread::snapshot_thread_ids(&d))
-                                .unwrap_or_default();
-                            let _ = start_new_thread(&issue_id, &workspace, &before_ids);
-                            load_threads_for_issue(&mut app, &issue_id);
+                let is_typing = app.workspace_picker.as_ref().is_some_and(|p| p.typing);
+                if is_typing {
+                    match key.code {
+                        KeyCode::Enter => {
+                            let typed_path = app
+                                .workspace_picker
+                                .as_mut()
+                                .and_then(|p| p.confirm_typed_path());
+                            if let (Some(workspace), Some(issue)) =
+                                (typed_path, app.selected_issue())
+                            {
+                                let issue_id = issue.identifier.clone();
+                                app.workspace_picker = None;
+                                let before_ids = amp::thread::amp_threads_dir()
+                                    .map(|d| amp::thread::snapshot_thread_ids(&d))
+                                    .unwrap_or_default();
+                                let _ = start_new_thread(&issue_id, &workspace, &before_ids);
+                                load_threads_for_issue(&mut app, &issue_id);
+                            }
                         }
-                    }
-                    KeyCode::Esc => app.cancel_workspace_picker(),
-                    KeyCode::Char('j') | KeyCode::Down => {
-                        if let Some(ref mut picker) = app.workspace_picker {
-                            picker.move_down();
+                        KeyCode::Esc => {
+                            if let Some(ref mut picker) = app.workspace_picker {
+                                picker.cancel_typing();
+                            }
                         }
-                    }
-                    KeyCode::Char('k') | KeyCode::Up => {
-                        if let Some(ref mut picker) = app.workspace_picker {
-                            picker.move_up();
+                        KeyCode::Backspace => {
+                            if let Some(ref mut picker) = app.workspace_picker {
+                                picker.input.pop();
+                            }
                         }
+                        KeyCode::Char(c) => {
+                            if let Some(ref mut picker) = app.workspace_picker {
+                                picker.input.push(c);
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
+                } else {
+                    match key.code {
+                        KeyCode::Enter => {
+                            let picker = app.workspace_picker.take();
+                            if let (Some(picker), Some(issue)) = (picker, app.selected_issue())
+                                && let Some(workspace) = picker.options.get(picker.selected)
+                            {
+                                let issue_id = issue.identifier.clone();
+                                let workspace = workspace.clone();
+                                let before_ids = amp::thread::amp_threads_dir()
+                                    .map(|d| amp::thread::snapshot_thread_ids(&d))
+                                    .unwrap_or_default();
+                                let _ = start_new_thread(&issue_id, &workspace, &before_ids);
+                                load_threads_for_issue(&mut app, &issue_id);
+                            }
+                        }
+                        KeyCode::Esc => app.cancel_workspace_picker(),
+                        KeyCode::Char('/') => {
+                            if let Some(ref mut picker) = app.workspace_picker {
+                                picker.start_typing();
+                            }
+                        }
+                        KeyCode::Char('j') | KeyCode::Down => {
+                            if let Some(ref mut picker) = app.workspace_picker {
+                                picker.move_down();
+                            }
+                        }
+                        KeyCode::Char('k') | KeyCode::Up => {
+                            if let Some(ref mut picker) = app.workspace_picker {
+                                picker.move_up();
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             } else if app.awaiting_quit {
                 app.awaiting_quit = false;

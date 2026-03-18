@@ -22,6 +22,10 @@ pub enum View {
 pub struct WorkspacePicker {
     pub options: Vec<String>,
     pub selected: usize,
+    /// When true, the user is typing a new workspace path via `/`.
+    pub typing: bool,
+    /// Buffer for the path being typed.
+    pub input: String,
 }
 
 #[allow(dead_code)]
@@ -30,6 +34,8 @@ impl WorkspacePicker {
         Self {
             options,
             selected: 0,
+            typing: false,
+            input: String::new(),
         }
     }
 
@@ -47,6 +53,28 @@ impl WorkspacePicker {
 
     pub fn selected_workspace(&self) -> Option<&str> {
         self.options.get(self.selected).map(|s| s.as_str())
+    }
+
+    pub fn start_typing(&mut self) {
+        self.typing = true;
+        self.input.clear();
+    }
+
+    pub fn cancel_typing(&mut self) {
+        self.typing = false;
+        self.input.clear();
+    }
+
+    /// Confirm the typed path. Returns the entered path if non-empty.
+    pub fn confirm_typed_path(&mut self) -> Option<String> {
+        self.typing = false;
+        let path = self.input.trim().to_string();
+        self.input.clear();
+        if path.is_empty() {
+            None
+        } else {
+            Some(path)
+        }
     }
 }
 
@@ -334,9 +362,7 @@ impl<A: LinearApi> App<A> {
     }
 
     pub fn show_workspace_picker(&mut self, workspaces: Vec<String>) {
-        if !workspaces.is_empty() {
-            self.workspace_picker = Some(WorkspacePicker::new(workspaces));
-        }
+        self.workspace_picker = Some(WorkspacePicker::new(workspaces));
     }
 
     pub fn cancel_workspace_picker(&mut self) {
@@ -874,10 +900,12 @@ mod tests {
     }
 
     #[test]
-    fn show_workspace_picker_with_empty_list_does_nothing() {
+    fn show_workspace_picker_with_empty_list_opens_picker() {
         let mut app = app_with_issues();
         app.show_workspace_picker(vec![]);
-        assert!(app.workspace_picker.is_none());
+        assert!(app.workspace_picker.is_some());
+        let picker = app.workspace_picker.as_ref().unwrap();
+        assert!(picker.options.is_empty());
     }
 
     #[test]
@@ -888,5 +916,97 @@ mod tests {
 
         app.cancel_workspace_picker();
         assert!(app.workspace_picker.is_none());
+    }
+
+    #[test]
+    fn workspace_picker_start_typing() {
+        let mut picker = WorkspacePicker::new(vec!["/a".into()]);
+        assert!(!picker.typing);
+
+        picker.start_typing();
+        assert!(picker.typing);
+        assert!(picker.input.is_empty());
+    }
+
+    #[test]
+    fn workspace_picker_cancel_typing() {
+        let mut picker = WorkspacePicker::new(vec!["/a".into()]);
+        picker.start_typing();
+        picker.input.push_str("/some/path");
+        picker.cancel_typing();
+
+        assert!(!picker.typing);
+        assert!(picker.input.is_empty());
+    }
+
+    #[test]
+    fn workspace_picker_confirm_typed_path_returns_path() {
+        let mut picker = WorkspacePicker::new(vec![]);
+        picker.start_typing();
+        picker.input.push_str("/my/workspace");
+
+        let result = picker.confirm_typed_path();
+        assert_eq!(result, Some("/my/workspace".to_string()));
+        assert!(!picker.typing);
+        assert!(picker.input.is_empty());
+    }
+
+    #[test]
+    fn workspace_picker_confirm_typed_path_trims_whitespace() {
+        let mut picker = WorkspacePicker::new(vec![]);
+        picker.start_typing();
+        picker.input.push_str("  /my/workspace  ");
+
+        let result = picker.confirm_typed_path();
+        assert_eq!(result, Some("/my/workspace".to_string()));
+    }
+
+    #[test]
+    fn workspace_picker_confirm_empty_path_returns_none() {
+        let mut picker = WorkspacePicker::new(vec![]);
+        picker.start_typing();
+
+        let result = picker.confirm_typed_path();
+        assert!(result.is_none());
+        assert!(!picker.typing);
+    }
+
+    #[test]
+    fn workspace_picker_confirm_whitespace_only_returns_none() {
+        let mut picker = WorkspacePicker::new(vec![]);
+        picker.start_typing();
+        picker.input.push_str("   ");
+
+        let result = picker.confirm_typed_path();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn workspace_picker_typing_does_not_highlight_list() {
+        let mut picker = WorkspacePicker::new(vec!["/a".into(), "/b".into()]);
+        assert!(!picker.typing);
+        // When not typing, selected item is highlighted (tested by selected_workspace)
+        assert_eq!(picker.selected_workspace(), Some("/a"));
+
+        picker.start_typing();
+        // selected_workspace still returns the same, but the UI won't highlight it
+        // (the typing flag tells the renderer to suppress highlight)
+        assert!(picker.typing);
+        assert_eq!(picker.selected, 0);
+    }
+
+    #[test]
+    fn workspace_picker_typing_input_accumulates() {
+        let mut picker = WorkspacePicker::new(vec![]);
+        picker.start_typing();
+        picker.input.push('/');
+        picker.input.push('h');
+        picker.input.push('o');
+        picker.input.push('m');
+        picker.input.push('e');
+        assert_eq!(picker.input, "/home");
+
+        picker.input.pop();
+        assert_eq!(picker.input, "/hom");
     }
 }
