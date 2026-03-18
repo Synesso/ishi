@@ -112,11 +112,8 @@ async fn main() -> Result<()> {
     let client = LinearClient::new(api_key);
     let mut app = App::new(client);
 
-    // Fetch issues before entering TUI
-    match app.api.fetch_my_issues().await {
-        Ok(issues) => app.issues = issues,
-        Err(e) => eprintln!("Failed to fetch issues: {e}"),
-    }
+    // Fetch issues before entering TUI (populates cache)
+    app.load_issues().await;
 
     // Terminal setup
     enable_raw_mode()?;
