@@ -60,6 +60,9 @@ pub struct App<A: LinearApi> {
     pub awaiting_filter: bool,
     pub awaiting_sort: bool,
     pub sort: Option<(SortColumn, SortDirection)>,
+    pub search: Option<String>,
+    pub search_input: String,
+    pub searching: bool,
     pub detail_scroll: u16,
     pub detail_scroll_max: u16,
 }
@@ -80,31 +83,33 @@ impl<A: LinearApi> App<A> {
             awaiting_filter: false,
             awaiting_sort: false,
             sort: None,
+            search: None,
+            search_input: String::new(),
+            searching: false,
             detail_scroll: 0,
             detail_scroll_max: 0,
         }
     }
 
     pub fn filtered_issues(&self) -> Vec<&Issue> {
-        let mut issues: Vec<&Issue> = match &self.filter {
-            Some((col, f)) => {
-                let lower = f.to_lowercase();
-                self.issues
-                    .iter()
-                    .filter(|i| {
-                        let value = match col {
-                            SortColumn::Identifier => i.identifier.as_str(),
-                            SortColumn::Title => i.title.as_str(),
-                            SortColumn::Project => i.project_str(),
-                            SortColumn::Status => i.status_str(),
-                            SortColumn::Priority => i.priority_str(),
-                        };
-                        value.to_lowercase().contains(&lower)
-                    })
-                    .collect()
-            }
-            None => self.issues.iter().collect(),
-        };
+        let mut issues: Vec<&Issue> = self.issues.iter().collect();
+        if let Some((col, f)) = &self.filter {
+            let lower = f.to_lowercase();
+            issues.retain(|i| {
+                let value = match col {
+                    SortColumn::Identifier => i.identifier.as_str(),
+                    SortColumn::Title => i.title.as_str(),
+                    SortColumn::Project => i.project_str(),
+                    SortColumn::Status => i.status_str(),
+                    SortColumn::Priority => i.priority_str(),
+                };
+                value.to_lowercase().contains(&lower)
+            });
+        }
+        if let Some(q) = &self.search {
+            let lower = q.to_lowercase();
+            issues.retain(|i| i.matches_search(&lower));
+        }
         if let Some((col, dir)) = &self.sort {
             issues.sort_by(|a, b| {
                 let ord = match col {
@@ -153,6 +158,32 @@ impl<A: LinearApi> App<A> {
         if len > 0 {
             self.selected = len - 1;
         }
+    }
+
+    pub fn start_search(&mut self) {
+        self.searching = true;
+        self.search_input.clear();
+    }
+
+    pub fn apply_search(&mut self) {
+        self.searching = false;
+        if self.search_input.is_empty() {
+            self.search = None;
+        } else {
+            self.search = Some(self.search_input.clone());
+        }
+        self.selected = 0;
+    }
+
+    pub fn cancel_search(&mut self) {
+        self.searching = false;
+        self.search_input.clear();
+    }
+
+    pub fn clear_search(&mut self) {
+        self.search = None;
+        self.search_input.clear();
+        self.selected = 0;
     }
 
     pub fn start_filter(&mut self) {
@@ -398,5 +429,70 @@ mod tests {
         app.detail_scroll_max = 0; // content fits in box
         app.scroll_detail_down();
         assert_eq!(app.detail_scroll, 0);
+    }
+
+    #[test]
+    fn search_filters_across_all_columns() {
+        let mut app = app_with_issues();
+        app.search = Some("jem-2".into());
+        let results = app.filtered_issues();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].identifier, "JEM-2");
+    }
+
+    #[test]
+    fn search_is_case_insensitive() {
+        let mut app = app_with_issues();
+        app.search = Some("ALPHA".into());
+        assert_eq!(app.filtered_issues().len(), 1);
+    }
+
+    #[test]
+    fn search_matches_priority() {
+        let mut app = app_with_issues();
+        app.search = Some("high".into());
+        let results = app.filtered_issues();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].identifier, "JEM-1");
+    }
+
+    #[test]
+    fn apply_empty_search_clears() {
+        let mut app = app_with_issues();
+        app.start_search();
+        app.apply_search();
+        assert!(app.search.is_none());
+        assert!(!app.searching);
+    }
+
+    #[test]
+    fn apply_search_sets_and_resets_cursor() {
+        let mut app = app_with_issues();
+        app.selected = 2;
+        app.start_search();
+        app.search_input = "beta".into();
+        app.apply_search();
+        assert_eq!(app.search.as_deref(), Some("beta"));
+        assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn cancel_search_discards_input() {
+        let mut app = app_with_issues();
+        app.start_search();
+        app.search_input = "something".into();
+        app.cancel_search();
+        assert!(!app.searching);
+        assert!(app.search_input.is_empty());
+    }
+
+    #[test]
+    fn search_and_filter_combine() {
+        let mut app = app_with_issues();
+        app.search = Some("task".into());
+        assert_eq!(app.filtered_issues().len(), 3);
+        app.filter = Some((SortColumn::Title, "alpha".into()));
+        assert_eq!(app.filtered_issues().len(), 1);
+        assert_eq!(app.filtered_issues()[0].identifier, "JEM-1");
     }
 }

@@ -77,6 +77,18 @@ async fn main() -> Result<()> {
                     KeyCode::Char('r') => app.start_column_filter(app::SortColumn::Priority),
                     _ => {}
                 }
+            } else if app.searching {
+                match key.code {
+                    KeyCode::Enter => app.apply_search(),
+                    KeyCode::Esc => app.cancel_search(),
+                    KeyCode::Backspace => {
+                        app.search_input.pop();
+                    }
+                    KeyCode::Char(c) => {
+                        app.search_input.push(c);
+                    }
+                    _ => {}
+                }
             } else if app.filtering {
                 match key.code {
                     KeyCode::Enter => app.apply_filter(),
@@ -108,8 +120,14 @@ async fn main() -> Result<()> {
                     keys::Action::Top => app.top(),
                     keys::Action::Bottom => app.bottom(),
                     keys::Action::Select => app.select_issue(),
-                    keys::Action::Search => app.start_filter(),
-                    keys::Action::Back => app.clear_filter(),
+                    keys::Action::Search => app.start_search(),
+                    keys::Action::Back => {
+                        if app.search.is_some() {
+                            app.clear_search();
+                        } else {
+                            app.clear_filter();
+                        }
+                    }
                     keys::Action::OrderBy => app.awaiting_sort = true,
                     keys::Action::FilterBy => app.awaiting_filter = true,
                     _ => {}

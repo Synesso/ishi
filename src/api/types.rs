@@ -9,11 +9,43 @@ pub struct Issue {
     pub state: Option<IssueState>,
     pub priority: Option<f64>,
     pub project: Option<IssueProject>,
+    pub description: Option<String>,
+    pub assignee: Option<IssueUser>,
+    pub labels: Option<IssueLabels>,
+    pub comments: Option<IssueComments>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct IssueProject {
     pub name: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct IssueUser {
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct IssueLabel {
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct IssueLabels {
+    pub nodes: Vec<IssueLabel>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct IssueComment {
+    pub body: String,
+    pub user: Option<IssueUser>,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct IssueComments {
+    pub nodes: Vec<IssueComment>,
 }
 
 impl Issue {
@@ -33,6 +65,14 @@ impl Issue {
             Some(4) => "Low",
             _ => "—",
         }
+    }
+
+    pub fn matches_search(&self, query: &str) -> bool {
+        self.identifier.to_lowercase().contains(query)
+            || self.title.to_lowercase().contains(query)
+            || self.project_str().to_lowercase().contains(query)
+            || self.status_str().to_lowercase().contains(query)
+            || self.priority_str().to_lowercase().contains(query)
     }
 }
 

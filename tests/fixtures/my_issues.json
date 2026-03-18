@@ -8,7 +8,11 @@
           "title": "First issue",
           "state": { "name": "In Progress" },
           "priority": 2.0,
-          "project": { "name": "Alpha" }
+          "project": { "name": "Alpha" },
+          "description": "This is the first issue description.",
+          "assignee": { "name": "Jem" },
+          "labels": { "nodes": [{ "name": "bug" }] },
+          "comments": { "nodes": [{ "body": "Working on it", "user": { "name": "Jem" }, "createdAt": "2026-03-18T01:00:00Z" }] }
         },
         {
           "id": "issue-2",
@@ -16,7 +20,11 @@
           "title": "Second issue",
           "state": { "name": "Todo" },
           "priority": 3.0,
-          "project": null
+          "project": null,
+          "description": null,
+          "assignee": null,
+          "labels": { "nodes": [] },
+          "comments": { "nodes": [] }
         }
       ]
     }

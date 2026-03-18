@@ -21,6 +21,10 @@ query {
         state { name }
         priority
         project { name }
+        description
+        assignee { name }
+        labels { nodes { name } }
+        comments { nodes { body user { name } createdAt } }
       }
     }
   }
