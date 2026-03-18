@@ -18,6 +18,7 @@ use ratatui::{Terminal, prelude::CrosstermBackend};
 use std::collections::HashSet;
 use std::io::stdout;
 use std::path::Path;
+use tokio::sync::mpsc;
 
 enum ThreadRunModeAction {
     Foreground {
@@ -334,6 +335,9 @@ async fn main() -> Result<()> {
         )));
     }
 
+    // Channel for background tasks to report errors back to the UI.
+    let (bg_error_tx, mut bg_error_rx) = mpsc::unbounded_channel::<String>();
+
     // Terminal setup
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
@@ -341,6 +345,10 @@ async fn main() -> Result<()> {
 
     // Main loop
     while app.running {
+        // Check for errors from background tasks.
+        while let Ok(msg) = bg_error_rx.try_recv() {
+            app.error = Some(app::AppError::new(msg));
+        }
         terminal.draw(|frame| {
             let area = frame.area();
             match app.view {
@@ -544,6 +552,33 @@ async fn main() -> Result<()> {
                     }
                     None => {}
                 }
+            } else if app.awaiting_state_change {
+                match key.code {
+                    KeyCode::Enter => {
+                        let state_name = app.selected_state_option().map(|s| s.to_string());
+                        let issue = app.context_issue().map(|i| (i.id.clone(), i.identifier.clone()));
+                        app.cancel_state_change();
+                        if let (Some(state_name), Some((issue_id, identifier))) = (state_name, issue) {
+                            // Optimistic update: apply locally first for instant feedback.
+                            app.apply_local_state_change(&state_name);
+                            // Fire-and-forget: spawn the API call in the background.
+                            let api = app.api.clone();
+                            let tx = bg_error_tx.clone();
+                            tokio::spawn(async move {
+                                if let Err(err) = api.update_issue_state(&issue_id, &state_name).await {
+                                    let _ = tx.send(format!(
+                                        "Failed to update state for {}: {}",
+                                        identifier, err
+                                    ));
+                                }
+                            });
+                        }
+                    }
+                    KeyCode::Esc => app.cancel_state_change(),
+                    KeyCode::Char('j') | KeyCode::Down | KeyCode::Right => app.state_change_move_down(),
+                    KeyCode::Char('k') | KeyCode::Up | KeyCode::Left => app.state_change_move_up(),
+                    _ => {}
+                }
             } else if app.awaiting_sort {
                 app.awaiting_sort = false;
                 match key.code {
@@ -632,6 +667,11 @@ async fn main() -> Result<()> {
                         }
                         keys::Action::Help => app.toggle_help(),
                         keys::Action::OpenIn => app.awaiting_open = true,
+                        keys::Action::ChangeState => {
+                            if app.context_issue().is_some() {
+                                app.start_state_change();
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -733,6 +773,11 @@ async fn main() -> Result<()> {
                     keys::Action::Projects => {
                         app.switch_to_projects();
                         app.load_projects().await;
+                    }
+                    keys::Action::ChangeState => {
+                        if app.context_issue().is_some() {
+                            app.start_state_change();
+                        }
                     }
                     _ => {}
                 }
