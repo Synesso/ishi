@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame,
 };
 
@@ -248,9 +248,54 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
             spans.push(Span::styled("Tab", key_style));
             spans.push(Span::raw(" threads"));
         }
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled("a", key_style));
+        spans.push(Span::raw(" new thread"));
         Line::from(spans)
     };
     frame.render_widget(Paragraph::new(bar), chunks[3]);
+
+    // Workspace picker modal
+    if let Some(ref picker) = app.workspace_picker {
+        let picker_height = (picker.options.len() as u16 + 2).min(area.height.saturating_sub(4));
+        let picker_width = picker
+            .options
+            .iter()
+            .map(|s| s.len() as u16)
+            .max()
+            .unwrap_or(20)
+            .max(20)
+            + 4;
+        let picker_width = picker_width.min(area.width.saturating_sub(4));
+
+        let x = area.x + (area.width.saturating_sub(picker_width)) / 2;
+        let y = area.y + (area.height.saturating_sub(picker_height)) / 2;
+        let popup_area = Rect::new(x, y, picker_width, picker_height);
+
+        frame.render_widget(Clear, popup_area);
+
+        let lines: Vec<Line> = picker
+            .options
+            .iter()
+            .enumerate()
+            .map(|(i, ws)| {
+                let style = if i == picker.selected {
+                    Style::default().add_modifier(Modifier::REVERSED)
+                } else {
+                    Style::default()
+                };
+                Line::from(Span::styled(format!(" {} ", ws), style))
+            })
+            .collect();
+
+        let popup = Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Select workspace")
+                .border_style(Style::default().fg(Color::Cyan)),
+        );
+        frame.render_widget(popup, popup_area);
+    }
 }
 
 fn status_style(status: &str) -> Style {

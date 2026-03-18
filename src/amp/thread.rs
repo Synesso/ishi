@@ -166,6 +166,24 @@ pub fn read_thread(id: &str) -> Result<ThreadSummary> {
     read_thread_summary(&path)
 }
 
+/// Snapshot all thread IDs from a given directory by listing `*.json` filenames.
+///
+/// Returns a set of thread IDs (filenames without `.json` extension).
+pub fn snapshot_thread_ids(dir: &Path) -> std::collections::HashSet<String> {
+    let mut ids = std::collections::HashSet::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "json")
+                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+            {
+                ids.insert(stem.to_string());
+            }
+        }
+    }
+    ids
+}
+
 /// List all thread summaries from the default Amp threads directory.
 ///
 /// Scans `~/.local/share/amp/threads/*.json` and parses metadata from each file.
@@ -392,6 +410,59 @@ mod tests {
     fn list_threads_in_nonexistent_dir_returns_error() {
         let result = list_threads_in(Path::new("/nonexistent/dir"));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn snapshot_thread_ids_empty_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let ids = snapshot_thread_ids(dir.path());
+        assert!(ids.is_empty());
+    }
+
+    #[test]
+    fn snapshot_thread_ids_finds_json_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("T-abc.json"), "{}").unwrap();
+        std::fs::write(dir.path().join("T-def.json"), "{}").unwrap();
+        std::fs::write(dir.path().join("notes.txt"), "not a thread").unwrap();
+
+        let ids = snapshot_thread_ids(dir.path());
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains("T-abc"));
+        assert!(ids.contains("T-def"));
+    }
+
+    #[test]
+    fn snapshot_thread_ids_nonexistent_dir() {
+        let ids = snapshot_thread_ids(Path::new("/nonexistent/dir"));
+        assert!(ids.is_empty());
+    }
+
+    #[test]
+    fn snapshot_thread_ids_diff_detects_new_thread() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("T-existing.json"), "{}").unwrap();
+
+        let before = snapshot_thread_ids(dir.path());
+        assert_eq!(before.len(), 1);
+
+        std::fs::write(dir.path().join("T-new.json"), "{}").unwrap();
+
+        let after = snapshot_thread_ids(dir.path());
+        let new_ids: Vec<&String> = after.difference(&before).collect();
+        assert_eq!(new_ids.len(), 1);
+        assert_eq!(*new_ids[0], "T-new");
+    }
+
+    #[test]
+    fn snapshot_thread_ids_diff_empty_when_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("T-existing.json"), "{}").unwrap();
+
+        let before = snapshot_thread_ids(dir.path());
+        let after = snapshot_thread_ids(dir.path());
+        let new_ids: Vec<&String> = after.difference(&before).collect();
+        assert!(new_ids.is_empty());
     }
 
     #[test]

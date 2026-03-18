@@ -17,6 +17,39 @@ pub enum View {
     Detail,
 }
 
+/// State for the workspace picker modal shown when starting a new Amp thread.
+#[derive(Debug, Clone)]
+pub struct WorkspacePicker {
+    pub options: Vec<String>,
+    pub selected: usize,
+}
+
+#[allow(dead_code)]
+impl WorkspacePicker {
+    pub fn new(options: Vec<String>) -> Self {
+        Self {
+            options,
+            selected: 0,
+        }
+    }
+
+    pub fn move_down(&mut self) {
+        if !self.options.is_empty() && self.selected < self.options.len() - 1 {
+            self.selected += 1;
+        }
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected > 0 {
+            self.selected -= 1;
+        }
+    }
+
+    pub fn selected_workspace(&self) -> Option<&str> {
+        self.options.get(self.selected).map(|s| s.as_str())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortColumn {
     Identifier,
@@ -76,6 +109,7 @@ pub struct App<A: LinearApi> {
     pub detail_section: DetailSection,
     pub detail_threads: Vec<ThreadSummary>,
     pub detail_thread_selected: usize,
+    pub workspace_picker: Option<WorkspacePicker>,
 }
 
 impl<A: LinearApi> App<A> {
@@ -103,6 +137,7 @@ impl<A: LinearApi> App<A> {
             detail_section: DetailSection::Body,
             detail_threads: Vec::new(),
             detail_thread_selected: 0,
+            workspace_picker: None,
         }
     }
 
@@ -296,6 +331,16 @@ impl<A: LinearApi> App<A> {
 
     pub fn focus_body(&mut self) {
         self.detail_section = DetailSection::Body;
+    }
+
+    pub fn show_workspace_picker(&mut self, workspaces: Vec<String>) {
+        if !workspaces.is_empty() {
+            self.workspace_picker = Some(WorkspacePicker::new(workspaces));
+        }
+    }
+
+    pub fn cancel_workspace_picker(&mut self) {
+        self.workspace_picker = None;
     }
 
     pub async fn refresh(&mut self) {
@@ -766,5 +811,82 @@ mod tests {
         let mut app = app_with_issues();
         app.detail_section = DetailSection::Threads;
         assert!(app.selected_thread().is_none());
+    }
+
+    #[test]
+    fn workspace_picker_navigation() {
+        let mut picker = WorkspacePicker::new(vec![
+            "/a".into(),
+            "/b".into(),
+            "/c".into(),
+        ]);
+        assert_eq!(picker.selected, 0);
+        assert_eq!(picker.selected_workspace(), Some("/a"));
+
+        picker.move_down();
+        assert_eq!(picker.selected, 1);
+        assert_eq!(picker.selected_workspace(), Some("/b"));
+
+        picker.move_down();
+        assert_eq!(picker.selected, 2);
+
+        picker.move_down(); // should not exceed
+        assert_eq!(picker.selected, 2);
+
+        picker.move_up();
+        assert_eq!(picker.selected, 1);
+
+        picker.move_up();
+        assert_eq!(picker.selected, 0);
+
+        picker.move_up(); // should not underflow
+        assert_eq!(picker.selected, 0);
+    }
+
+    #[test]
+    fn workspace_picker_empty_options() {
+        let picker = WorkspacePicker::new(vec![]);
+        assert_eq!(picker.selected, 0);
+        assert!(picker.selected_workspace().is_none());
+    }
+
+    #[test]
+    fn workspace_picker_single_option() {
+        let mut picker = WorkspacePicker::new(vec!["/only".into()]);
+        assert_eq!(picker.selected_workspace(), Some("/only"));
+        picker.move_down();
+        assert_eq!(picker.selected, 0);
+        picker.move_up();
+        assert_eq!(picker.selected, 0);
+    }
+
+    #[test]
+    fn show_workspace_picker_sets_state() {
+        let mut app = app_with_issues();
+        assert!(app.workspace_picker.is_none());
+
+        app.show_workspace_picker(vec!["/ws1".into(), "/ws2".into()]);
+        assert!(app.workspace_picker.is_some());
+
+        let picker = app.workspace_picker.as_ref().unwrap();
+        assert_eq!(picker.options.len(), 2);
+        assert_eq!(picker.selected, 0);
+    }
+
+    #[test]
+    fn show_workspace_picker_with_empty_list_does_nothing() {
+        let mut app = app_with_issues();
+        app.show_workspace_picker(vec![]);
+        assert!(app.workspace_picker.is_none());
+    }
+
+    #[test]
+    fn cancel_workspace_picker_clears_state() {
+        let mut app = app_with_issues();
+        app.show_workspace_picker(vec!["/ws".into()]);
+        assert!(app.workspace_picker.is_some());
+
+        app.cancel_workspace_picker();
+        assert!(app.workspace_picker.is_none());
     }
 }

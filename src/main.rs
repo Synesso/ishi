@@ -17,6 +17,7 @@ use crossterm::{
 use ratatui::{prelude::CrosstermBackend, Terminal};
 use std::io::stdout;
 use std::path::Path;
+use std::collections::HashSet;
 
 /// Look up the workspace for a thread from the state file, then run
 /// `amp threads continue <thread_id>` in that workspace directory,
@@ -58,6 +59,56 @@ fn load_threads_for_issue(app: &mut App<impl LinearApi>, identifier: &str) {
     app.detail_thread_selected = 0;
 }
 
+/// Open the workspace picker for the current issue.
+/// Loads workspace history from state and populates the picker.
+fn open_workspace_picker(app: &mut App<impl LinearApi>) {
+    let state_path = match amp::state::state_path() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let state = match amp::state::State::load(&state_path) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let workspaces: Vec<String> = state.workspaces().to_vec();
+    if workspaces.is_empty() {
+        return;
+    }
+    app.show_workspace_picker(workspaces);
+}
+
+/// Execute the new-thread flow:
+/// 1. Snapshot thread IDs
+/// 2. Suspend TUI and run `amp threads new` in the chosen workspace
+/// 3. Diff thread IDs to detect the new thread
+/// 4. If found, save thread link and update workspace history
+fn start_new_thread(
+    issue_identifier: &str,
+    workspace: &str,
+    before_ids: &HashSet<String>,
+) -> Result<()> {
+    let workspace_path = Path::new(workspace);
+    suspend::run_external_command("amp", &["threads", "new"], workspace_path)?;
+
+    // Diff thread IDs to find the newly created thread
+    let threads_dir = match amp::thread::amp_threads_dir() {
+        Some(d) => d,
+        None => return Ok(()),
+    };
+    let after_ids = amp::thread::snapshot_thread_ids(&threads_dir);
+    let new_ids: Vec<&String> = after_ids.difference(before_ids).collect();
+
+    if let Some(new_thread_id) = new_ids.first() {
+        let state_path = amp::state::state_path()?;
+        let mut state = amp::state::State::load(&state_path)?;
+        state.add_thread_link(new_thread_id, issue_identifier, workspace);
+        state.add_workspace(workspace);
+        state.save(&state_path)?;
+    }
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let api_key = config::resolve_api_key()?;
@@ -94,7 +145,36 @@ async fn main() -> Result<()> {
         if event::poll(std::time::Duration::from_millis(100))?
             && let Event::Key(key) = event::read()?
         {
-            if app.awaiting_quit {
+            if app.workspace_picker.is_some() {
+                match key.code {
+                    KeyCode::Enter => {
+                        let picker = app.workspace_picker.take();
+                        if let (Some(picker), Some(issue)) = (picker, app.selected_issue())
+                            && let Some(workspace) = picker.options.get(picker.selected)
+                        {
+                            let issue_id = issue.identifier.clone();
+                            let workspace = workspace.clone();
+                            let before_ids = amp::thread::amp_threads_dir()
+                                .map(|d| amp::thread::snapshot_thread_ids(&d))
+                                .unwrap_or_default();
+                            let _ = start_new_thread(&issue_id, &workspace, &before_ids);
+                            load_threads_for_issue(&mut app, &issue_id);
+                        }
+                    }
+                    KeyCode::Esc => app.cancel_workspace_picker(),
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        if let Some(ref mut picker) = app.workspace_picker {
+                            picker.move_down();
+                        }
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        if let Some(ref mut picker) = app.workspace_picker {
+                            picker.move_up();
+                        }
+                    }
+                    _ => {}
+                }
+            } else if app.awaiting_quit {
                 app.awaiting_quit = false;
                 match key.code {
                     KeyCode::Char('q') => app.running = false,
@@ -160,6 +240,7 @@ async fn main() -> Result<()> {
                             }
                             keys::Action::Tab => app.focus_body(),
                             keys::Action::Refresh => app.refresh().await,
+                            keys::Action::NewThread => open_workspace_picker(&mut app),
                             _ => {}
                         },
                         app::DetailSection::Body => match action {
@@ -170,6 +251,7 @@ async fn main() -> Result<()> {
                             keys::Action::Top => app.detail_scroll = 0,
                             keys::Action::Refresh => app.refresh().await,
                             keys::Action::Tab => app.focus_threads(),
+                            keys::Action::NewThread => open_workspace_picker(&mut app),
                             _ => {}
                         },
                     }
