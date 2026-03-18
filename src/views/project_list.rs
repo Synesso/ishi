@@ -1,9 +1,9 @@
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
-    Frame,
 };
 
 use crate::api::client::LinearApi;
@@ -75,14 +75,22 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
 
     frame.render_stateful_widget(table, chunks[0], &mut table_state);
 
-    let key_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+    let key_style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
 
     if show_bar {
         if let Some(ref err) = app.error {
             let line = Line::from(vec![
-                Span::styled("Error: ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Error: ",
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(&err.message, Style::default().fg(Color::Red)),
-                Span::styled(" (press Esc to dismiss)", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    " (press Esc to dismiss)",
+                    Style::default().fg(Color::DarkGray),
+                ),
             ]);
             frame.render_widget(Paragraph::new(line), chunks[1]);
         } else if app.refreshing {

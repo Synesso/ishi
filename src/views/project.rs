@@ -1,9 +1,9 @@
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
-    Frame,
 };
 
 use crate::api::client::LinearApi;
@@ -20,7 +20,11 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
             format!("Loading {} issues…", project_name),
             Style::default().fg(Color::Yellow),
         )))
-        .block(Block::default().borders(Borders::ALL).title(project_name.to_string()));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(project_name.to_string()),
+        );
         frame.render_widget(loading, area);
         return;
     }
@@ -55,12 +59,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
                     issue.priority_str(),
                     priority_style(issue.priority_str()),
                 )),
-                Cell::from(
-                    issue
-                        .assignee
-                        .as_ref()
-                        .map_or("—", |a| a.name.as_str()),
-                ),
+                Cell::from(issue.assignee.as_ref().map_or("—", |a| a.name.as_str())),
             ])
         })
         .collect();
@@ -95,9 +94,15 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
     if show_bar {
         if let Some(ref err) = app.error {
             let line = Line::from(vec![
-                Span::styled("Error: ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Error: ",
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(&err.message, Style::default().fg(Color::Red)),
-                Span::styled(" (press Esc to dismiss)", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    " (press Esc to dismiss)",
+                    Style::default().fg(Color::DarkGray),
+                ),
             ]);
             frame.render_widget(Paragraph::new(line), chunks[1]);
         } else if app.refreshing {
@@ -131,9 +136,7 @@ fn status_style(status: &str) -> Style {
 
 fn priority_style(priority: &str) -> Style {
     match priority {
-        "Urgent" => Style::default()
-            .fg(Color::Red)
-            .add_modifier(Modifier::BOLD),
+        "Urgent" => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         "High" => Style::default().fg(Color::Red),
         "Medium" => Style::default().fg(Color::Yellow),
         "Low" => Style::default().fg(Color::DarkGray),

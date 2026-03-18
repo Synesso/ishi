@@ -1,9 +1,9 @@
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
-    Frame,
 };
 
 use crate::api::client::LinearApi;
@@ -23,9 +23,16 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
 
     let issues = app.filtered_issues();
 
-    let show_bar = app.refreshing || app.awaiting_quit || app.filtering || app.filter.is_some()
-        || app.awaiting_sort || app.awaiting_filter || app.awaiting_open
-        || app.searching || app.search.is_some() || app.error.is_some();
+    let show_bar = app.refreshing
+        || app.awaiting_quit
+        || app.filtering
+        || app.filter.is_some()
+        || app.awaiting_sort
+        || app.awaiting_filter
+        || app.awaiting_open
+        || app.searching
+        || app.search.is_some()
+        || app.error.is_some();
     let chunks = if show_bar {
         Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area)
     } else {
@@ -46,11 +53,31 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         .iter()
         .map(|issue| {
             Row::new(vec![
-                Cell::from(Line::from(highlight_match(issue.identifier.as_str(), search_query, Style::default()))),
-                Cell::from(Line::from(highlight_match(issue.title.as_str(), search_query, Style::default()))),
-                Cell::from(Line::from(highlight_match(issue.project_str(), search_query, Style::default()))),
-                Cell::from(Line::from(highlight_match(issue.status_str(), search_query, status_style(issue.status_str())))),
-                Cell::from(Line::from(highlight_match(issue.priority_str(), search_query, priority_style(issue.priority_str())))),
+                Cell::from(Line::from(highlight_match(
+                    issue.identifier.as_str(),
+                    search_query,
+                    Style::default(),
+                ))),
+                Cell::from(Line::from(highlight_match(
+                    issue.title.as_str(),
+                    search_query,
+                    Style::default(),
+                ))),
+                Cell::from(Line::from(highlight_match(
+                    issue.project_str(),
+                    search_query,
+                    Style::default(),
+                ))),
+                Cell::from(Line::from(highlight_match(
+                    issue.status_str(),
+                    search_query,
+                    status_style(issue.status_str()),
+                ))),
+                Cell::from(Line::from(highlight_match(
+                    issue.priority_str(),
+                    search_query,
+                    priority_style(issue.priority_str()),
+                ))),
             ])
         })
         .collect();
@@ -72,8 +99,21 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
     };
 
     let title = match &app.filter {
-        Some((col, f)) => format!("My Issues ({} of {}){}{} [filter: {} = {}]", issues.len(), app.issues.len(), sort_indicator, search_indicator, col.label(), f),
-        None => format!("My Issues ({}){}{}", issues.len(), sort_indicator, search_indicator),
+        Some((col, f)) => format!(
+            "My Issues ({} of {}){}{} [filter: {} = {}]",
+            issues.len(),
+            app.issues.len(),
+            sort_indicator,
+            search_indicator,
+            col.label(),
+            f
+        ),
+        None => format!(
+            "My Issues ({}){}{}",
+            issues.len(),
+            sort_indicator,
+            search_indicator
+        ),
     };
 
     let table = Table::new(
@@ -97,7 +137,9 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
 
     frame.render_stateful_widget(table, chunks[0], &mut table_state);
 
-    let key_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+    let key_style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
 
     let column_hints = vec![
         Span::styled("i", key_style),
@@ -115,9 +157,15 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
     // Status bar
     if let Some(ref err) = app.error {
         let line = Line::from(vec![
-            Span::styled("Error: ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Error: ",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(&err.message, Style::default().fg(Color::Red)),
-            Span::styled(" (press Esc to dismiss)", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                " (press Esc to dismiss)",
+                Style::default().fg(Color::DarkGray),
+            ),
         ]);
         frame.render_widget(Paragraph::new(line), chunks[1]);
     } else if app.refreshing {
@@ -157,21 +205,25 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         };
         let line = Line::from(vec![
             Span::raw(prefix),
-            Span::styled(&app.filter_input, Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                &app.filter_input,
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
             Span::raw("▏"),
         ]);
         frame.render_widget(Paragraph::new(line), chunks[1]);
     } else if app.searching {
         let line = Line::from(vec![
             Span::raw("/"),
-            Span::styled(&app.search_input, Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                &app.search_input,
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
             Span::raw("▏"),
         ]);
         frame.render_widget(Paragraph::new(line), chunks[1]);
     } else if app.search.is_some() || app.filter.is_some() {
-        let line = Line::from(vec![
-            Span::raw("Active — press Esc to clear"),
-        ]);
+        let line = Line::from(vec![Span::raw("Active — press Esc to clear")]);
         frame.render_widget(Paragraph::new(line), chunks[1]);
     }
 }

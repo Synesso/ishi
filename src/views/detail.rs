@@ -1,9 +1,9 @@
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
-    Frame,
 };
 
 use crate::api::client::LinearApi;
@@ -38,10 +38,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
         Span::raw(issue.project_str()),
     ]));
 
-    let assignee = issue
-        .assignee
-        .as_ref()
-        .map_or("—", |a| a.name.as_str());
+    let assignee = issue.assignee.as_ref().map_or("—", |a| a.name.as_str());
     meta_lines.push(Line::from(vec![
         Span::styled("Assignee: ", label_style),
         Span::raw(assignee),
@@ -89,12 +86,14 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
     let title = Line::from(vec![
         Span::styled(
             issue.identifier.to_string(),
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw(format!(" — {}", issue.title)),
     ]);
-    let meta = Paragraph::new(meta_lines)
-        .block(Block::default().borders(Borders::ALL).title(title));
+    let meta =
+        Paragraph::new(meta_lines).block(Block::default().borders(Borders::ALL).title(title));
     frame.render_widget(meta, chunks[0]);
 
     // Description / Comments
@@ -120,14 +119,13 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
         body_lines.push(Line::raw(""));
 
         for comment in &comments.nodes {
-            let author = comment
-                .user
-                .as_ref()
-                .map_or("Unknown", |u| u.name.as_str());
+            let author = comment.user.as_ref().map_or("Unknown", |u| u.name.as_str());
             body_lines.push(Line::from(vec![
                 Span::styled(
                     author,
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     format!("  {}", &comment.created_at[..10]),
@@ -188,18 +186,12 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
                 };
                 let time_str = t.relative_time();
                 Line::from(vec![
-                    Span::styled(
-                        format!("  {} ", t.title),
-                        style,
-                    ),
+                    Span::styled(format!("  {} ", t.title), style),
                     Span::styled(
                         format!("({} msgs) ", t.message_count),
                         style.fg(Color::DarkGray),
                     ),
-                    Span::styled(
-                        time_str,
-                        style.fg(Color::DarkGray),
-                    ),
+                    Span::styled(time_str, style.fg(Color::DarkGray)),
                 ])
             })
             .collect();
@@ -214,7 +206,9 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
     }
 
     // Status bar
-    let key_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+    let key_style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
     let bar = if app.awaiting_quit {
         Line::from(vec![
             Span::raw("Press "),
@@ -230,10 +224,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
             Span::raw("ithub PR"),
         ])
     } else if app.detail_section == DetailSection::Threads {
-        let mut spans = vec![
-            Span::styled("Esc", key_style),
-            Span::raw(" back"),
-        ];
+        let mut spans = vec![Span::styled("Esc", key_style), Span::raw(" back")];
         if app.detail_threads.len() > 1 {
             spans.push(Span::raw("  "));
             spans.push(Span::styled("j", key_style));
@@ -249,10 +240,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
         Line::from(spans)
     } else {
         let can_scroll = content_lines > inner_height;
-        let mut spans = vec![
-            Span::styled("Esc", key_style),
-            Span::raw(" back"),
-        ];
+        let mut spans = vec![Span::styled("Esc", key_style), Span::raw(" back")];
         if can_scroll {
             spans.push(Span::raw("  "));
             spans.push(Span::styled("j", key_style));

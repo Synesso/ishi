@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 /// A thread's link to a Linear issue and the workspace it was started in.
@@ -10,13 +10,62 @@ pub struct ThreadLink {
     pub workspace: String,
 }
 
+/// Lifecycle state for a background Amp session run.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionRunStatus {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+    Stale,
+}
+
+impl Default for SessionRunStatus {
+    fn default() -> Self {
+        Self::Pending
+    }
+}
+
+/// Metadata for one backgroundable Amp session run.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct SessionRun {
+    /// Thread this run targets.
+    pub thread_id: String,
+    /// Linear issue identifier this run is associated with.
+    pub issue: String,
+    /// Workspace where this run executes.
+    pub workspace: String,
+    /// Process ID while the run is active.
+    #[serde(default)]
+    pub pid: Option<u32>,
+    /// Current lifecycle status.
+    #[serde(default)]
+    pub status: SessionRunStatus,
+    /// Path to run log output, if one is recorded.
+    #[serde(default)]
+    pub log_path: Option<String>,
+    /// Run record creation timestamp (milliseconds since Unix epoch).
+    pub created_at_ms: u64,
+    /// Last metadata update timestamp (milliseconds since Unix epoch).
+    pub updated_at_ms: u64,
+    /// Start timestamp when the process actually begins (milliseconds since epoch).
+    #[serde(default)]
+    pub started_at_ms: Option<u64>,
+    /// Terminal timestamp for completed/failed runs (milliseconds since epoch).
+    #[serde(default)]
+    pub finished_at_ms: Option<u64>,
+}
+
 /// Persistent state for ishi, stored at `~/.config/ishi/state.toml`.
 ///
-/// Two data structures:
+/// Three data structures:
 /// * **Thread links** — maps thread ID → issue identifier + workspace path.
 ///   One issue can have many threads, but each thread belongs to exactly one issue.
 /// * **Workspace history** — ordered list of previously used directory paths,
 ///   most recent first.
+/// * **Session runs** — maps run ID → lifecycle metadata for backgroundable Amp
+///   session execution.
 #[derive(Debug, Serialize, Deserialize, Default, Clone, PartialEq)]
 pub struct State {
     /// thread ID → link (issue identifier + workspace path)
@@ -26,6 +75,10 @@ pub struct State {
     /// Ordered list of workspace directory paths, most recent first.
     #[serde(default)]
     pub workspace_history: Vec<String>,
+
+    /// run ID → session run metadata.
+    #[serde(default)]
+    pub session_runs: BTreeMap<String, SessionRun>,
 }
 
 #[allow(dead_code)]
@@ -84,14 +137,29 @@ impl State {
     /// Add a workspace directory to the front of the history.
     /// If it already appears, it is moved to the front.
     pub fn add_workspace(&mut self, workspace: &str) {
-        self.workspace_history
-            .retain(|w| w != workspace);
+        self.workspace_history.retain(|w| w != workspace);
         self.workspace_history.insert(0, workspace.to_string());
     }
 
     /// Return the ordered workspace history (most recent first).
     pub fn workspaces(&self) -> &[String] {
         &self.workspace_history
+    }
+
+    /// Record session run metadata: run ID → lifecycle info.
+    /// If the run already exists, it is updated.
+    pub fn add_session_run(&mut self, run_id: &str, run: SessionRun) {
+        self.session_runs.insert(run_id.to_string(), run);
+    }
+
+    /// Look up a session run by run ID.
+    pub fn session_run(&self, run_id: &str) -> Option<&SessionRun> {
+        self.session_runs.get(run_id)
+    }
+
+    /// Return all session runs keyed by run ID in deterministic key order.
+    pub fn session_runs(&self) -> &BTreeMap<String, SessionRun> {
+        &self.session_runs
     }
 }
 
@@ -115,6 +183,7 @@ mod tests {
         let state = State::load(&path).unwrap();
         assert!(state.thread_links.is_empty());
         assert!(state.workspace_history.is_empty());
+        assert!(state.session_runs.is_empty());
     }
 
     #[test]
@@ -128,6 +197,21 @@ mod tests {
         state.add_thread_link("T-ghi-789", "JEM-2", "/home/user/project-b");
         state.add_workspace("/home/user/project-a");
         state.add_workspace("/home/user/project-b");
+        state.add_session_run(
+            "run-1",
+            SessionRun {
+                thread_id: "T-abc-123".to_string(),
+                issue: "JEM-1".to_string(),
+                workspace: "/home/user/project-a".to_string(),
+                pid: Some(4242),
+                status: SessionRunStatus::Running,
+                log_path: Some("/tmp/ishi-run-1.log".to_string()),
+                created_at_ms: 1_710_000_000_000,
+                updated_at_ms: 1_710_000_000_500,
+                started_at_ms: Some(1_710_000_000_250),
+                finished_at_ms: None,
+            },
+        );
 
         state.save(&path).unwrap();
 
@@ -201,6 +285,54 @@ mod tests {
     }
 
     #[test]
+    fn session_runs_empty_by_default() {
+        let state = State::default();
+        assert!(state.session_runs().is_empty());
+    }
+
+    #[test]
+    fn add_session_run_overwrites_existing() {
+        let mut state = State::default();
+        state.add_session_run(
+            "run-1",
+            SessionRun {
+                thread_id: "T-abc".to_string(),
+                issue: "JEM-1".to_string(),
+                workspace: "/ws".to_string(),
+                pid: Some(111),
+                status: SessionRunStatus::Pending,
+                log_path: None,
+                created_at_ms: 10,
+                updated_at_ms: 10,
+                started_at_ms: None,
+                finished_at_ms: None,
+            },
+        );
+        state.add_session_run(
+            "run-1",
+            SessionRun {
+                thread_id: "T-abc".to_string(),
+                issue: "JEM-1".to_string(),
+                workspace: "/ws".to_string(),
+                pid: Some(222),
+                status: SessionRunStatus::Running,
+                log_path: Some("/tmp/run-1.log".to_string()),
+                created_at_ms: 10,
+                updated_at_ms: 20,
+                started_at_ms: Some(15),
+                finished_at_ms: None,
+            },
+        );
+
+        assert_eq!(state.session_runs.len(), 1);
+        assert_eq!(state.session_run("run-1").and_then(|r| r.pid), Some(222));
+        assert_eq!(
+            state.session_run("run-1").map(|r| r.status),
+            Some(SessionRunStatus::Running)
+        );
+    }
+
+    #[test]
     fn save_creates_parent_directories() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nested").join("dir").join("state.toml");
@@ -222,7 +354,10 @@ mod tests {
         state.save(&path).unwrap();
 
         let loaded = State::load(&path).unwrap();
-        assert_eq!(loaded.workspaces(), &["/project-c", "/project-b", "/project-a"]);
+        assert_eq!(
+            loaded.workspaces(),
+            &["/project-c", "/project-b", "/project-a"]
+        );
     }
 
     #[test]
@@ -249,6 +384,7 @@ mod tests {
         let state = State::load(&path).unwrap();
         assert!(state.thread_links.is_empty());
         assert!(state.workspace_history.is_empty());
+        assert!(state.session_runs.is_empty());
     }
 
     #[test]
@@ -265,6 +401,7 @@ workspace = "/ws"
         let state = State::load(&path).unwrap();
         assert_eq!(state.threads_for_issue("JEM-1"), vec!["T-abc"]);
         assert!(state.workspace_history.is_empty());
+        assert!(state.session_runs.is_empty());
     }
 
     #[test]
@@ -277,5 +414,100 @@ workspace = "/ws"
         let state = State::load(&path).unwrap();
         assert!(state.thread_links.is_empty());
         assert_eq!(state.workspaces(), &["/a", "/b"]);
+        assert!(state.session_runs.is_empty());
+    }
+
+    #[test]
+    fn load_toml_without_session_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.toml");
+        let toml = r#"
+workspace_history = ["/a", "/b"]
+
+[thread_links.T-abc]
+issue = "JEM-1"
+workspace = "/ws"
+"#;
+        std::fs::write(&path, toml).unwrap();
+
+        let state = State::load(&path).unwrap();
+        assert_eq!(state.threads_for_issue("JEM-1"), vec!["T-abc"]);
+        assert_eq!(state.workspaces(), &["/a", "/b"]);
+        assert!(state.session_runs.is_empty());
+    }
+
+    #[test]
+    fn session_run_round_trips_through_save_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.toml");
+
+        let mut state = State::default();
+        state.add_session_run(
+            "run-xyz",
+            SessionRun {
+                thread_id: "T-abc".to_string(),
+                issue: "JEM-9".to_string(),
+                workspace: "/workspace/jem-9".to_string(),
+                pid: Some(9876),
+                status: SessionRunStatus::Completed,
+                log_path: Some("/tmp/jem-9-run.log".to_string()),
+                created_at_ms: 1_710_000_100_000,
+                updated_at_ms: 1_710_000_120_000,
+                started_at_ms: Some(1_710_000_101_000),
+                finished_at_ms: Some(1_710_000_119_000),
+            },
+        );
+        state.save(&path).unwrap();
+
+        let loaded = State::load(&path).unwrap();
+        assert_eq!(loaded, state);
+        assert_eq!(
+            loaded.session_run("run-xyz").map(|r| r.status),
+            Some(SessionRunStatus::Completed)
+        );
+    }
+
+    #[test]
+    fn session_runs_serialize_deterministically() {
+        let mut state = State::default();
+        state.add_session_run(
+            "run-b",
+            SessionRun {
+                thread_id: "T-b".to_string(),
+                issue: "JEM-2".to_string(),
+                workspace: "/ws/b".to_string(),
+                pid: None,
+                status: SessionRunStatus::Pending,
+                log_path: None,
+                created_at_ms: 2,
+                updated_at_ms: 2,
+                started_at_ms: None,
+                finished_at_ms: None,
+            },
+        );
+        state.add_session_run(
+            "run-a",
+            SessionRun {
+                thread_id: "T-a".to_string(),
+                issue: "JEM-1".to_string(),
+                workspace: "/ws/a".to_string(),
+                pid: Some(123),
+                status: SessionRunStatus::Running,
+                log_path: Some("/tmp/run-a.log".to_string()),
+                created_at_ms: 1,
+                updated_at_ms: 3,
+                started_at_ms: Some(2),
+                finished_at_ms: None,
+            },
+        );
+
+        let toml_first = toml::to_string_pretty(&state).unwrap();
+        let toml_second = toml::to_string_pretty(&state).unwrap();
+
+        assert_eq!(toml_first, toml_second);
+        let run_a_idx = toml_first.find("[session_runs.run-a]").unwrap();
+        let run_b_idx = toml_first.find("[session_runs.run-b]").unwrap();
+        assert!(run_a_idx < run_b_idx);
+        assert!(toml_first.contains("status = \"running\""));
     }
 }

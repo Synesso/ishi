@@ -105,18 +105,14 @@ pub trait LinearApi: Send + Sync {
         variables: Option<Value>,
     ) -> impl std::future::Future<Output = Result<Value>> + Send;
 
-    fn fetch_my_issues(
-        &self,
-    ) -> impl std::future::Future<Output = Result<Vec<Issue>>> + Send;
+    fn fetch_my_issues(&self) -> impl std::future::Future<Output = Result<Vec<Issue>>> + Send;
 
     fn fetch_pull_request_url(
         &self,
         issue_id: &str,
     ) -> impl std::future::Future<Output = Result<Option<String>>> + Send;
 
-    fn fetch_projects(
-        &self,
-    ) -> impl std::future::Future<Output = Result<Vec<Project>>> + Send;
+    fn fetch_projects(&self) -> impl std::future::Future<Output = Result<Vec<Project>>> + Send;
 
     fn fetch_project_issues(
         &self,
@@ -161,9 +157,8 @@ impl LinearApi for LinearClient {
 
     async fn fetch_my_issues(&self) -> Result<Vec<Issue>> {
         let resp = self.query(MY_ISSUES_QUERY, None).await?;
-        let issues: Vec<Issue> = serde_json::from_value(
-            resp["data"]["viewer"]["assignedIssues"]["nodes"].clone(),
-        )?;
+        let issues: Vec<Issue> =
+            serde_json::from_value(resp["data"]["viewer"]["assignedIssues"]["nodes"].clone())?;
         Ok(issues)
     }
 
@@ -174,7 +169,8 @@ impl LinearApi for LinearClient {
         if let Some(arr) = nodes.as_array() {
             for node in arr {
                 if let Some(url) = node["url"].as_str()
-                    && url.contains("github.com") && url.contains("/pull/")
+                    && url.contains("github.com")
+                    && url.contains("/pull/")
                 {
                     return Ok(Some(url.to_string()));
                 }

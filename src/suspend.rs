@@ -96,7 +96,11 @@ fn edit_text_raw(initial_content: &str) -> Result<Option<String>> {
 /// 6. Force terminal redraw (via the returned `needs_redraw` signal)
 ///
 /// Returns the command's exit status.
-pub fn run_external_command(program: &str, args: &[&str], working_dir: &Path) -> Result<ExitStatus> {
+pub fn run_external_command(
+    program: &str,
+    args: &[&str],
+    working_dir: &Path,
+) -> Result<ExitStatus> {
     run_external_command_with(&mut RealTerminal, program, args, working_dir)
 }
 
@@ -235,8 +239,7 @@ mod tests {
         let mut mock = MockTerminal::new();
         let dir = tempfile::tempdir().unwrap();
 
-        let status =
-            run_external_command_with(&mut mock, "echo", &["hello"], dir.path()).unwrap();
+        let status = run_external_command_with(&mut mock, "echo", &["hello"], dir.path()).unwrap();
 
         assert!(status.success());
         assert_eq!(
@@ -268,13 +271,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let marker = dir.path().join("marker.txt");
 
-        let status = run_external_command_with(
-            &mut mock,
-            "sh",
-            &["-c", "echo ok > marker.txt"],
-            dir.path(),
-        )
-        .unwrap();
+        let status =
+            run_external_command_with(&mut mock, "sh", &["-c", "echo ok > marker.txt"], dir.path())
+                .unwrap();
 
         assert!(status.success());
         assert!(marker.exists());

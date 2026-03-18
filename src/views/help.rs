@@ -1,9 +1,9 @@
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
-    Frame,
 };
 
 /// All keybindings shown in the help overlay.
@@ -88,13 +88,17 @@ mod tests {
     fn keybindings_have_descriptions() {
         for (key, desc) in KEYBINDINGS {
             assert!(!key.is_empty(), "key should not be empty");
-            assert!(!desc.is_empty(), "description should not be empty for key '{}'", key);
+            assert!(
+                !desc.is_empty(),
+                "description should not be empty for key '{}'",
+                key
+            );
         }
     }
 
     #[test]
     fn render_does_not_panic() {
-        use ratatui::{backend::TestBackend, Terminal};
+        use ratatui::{Terminal, backend::TestBackend};
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
@@ -106,7 +110,7 @@ mod tests {
 
     #[test]
     fn render_handles_small_area() {
-        use ratatui::{backend::TestBackend, Terminal};
+        use ratatui::{Terminal, backend::TestBackend};
         let backend = TestBackend::new(10, 5);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal

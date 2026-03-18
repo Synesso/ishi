@@ -122,7 +122,14 @@ impl WorkspacePicker {
         let base = &self.input;
         let path = Path::new(base);
         let (dir, prefix) = if base.ends_with('/') || base.is_empty() {
-            (if base.is_empty() { Path::new(".") } else { path }, "")
+            (
+                if base.is_empty() {
+                    Path::new(".")
+                } else {
+                    path
+                },
+                "",
+            )
         } else {
             let parent = path.parent().unwrap_or(Path::new("."));
             let file_name = path.file_name().and_then(|f| f.to_str()).unwrap_or("");
@@ -353,7 +360,10 @@ impl<A: LinearApi> App<A> {
                     SortColumn::Title => a.title.to_lowercase().cmp(&b.title.to_lowercase()),
                     SortColumn::Project => a.project_str().cmp(b.project_str()),
                     SortColumn::Status => a.status_str().cmp(b.status_str()),
-                    SortColumn::Priority => a.priority.partial_cmp(&b.priority).unwrap_or(Ordering::Equal),
+                    SortColumn::Priority => a
+                        .priority
+                        .partial_cmp(&b.priority)
+                        .unwrap_or(Ordering::Equal),
                 };
                 match dir {
                     SortDirection::Asc => ord,
@@ -668,7 +678,8 @@ impl<A: LinearApi> App<A> {
         match self.api.fetch_projects().await {
             Ok(projects) => {
                 self.error = None;
-                self.project_cache.insert(CACHE_KEY_PROJECTS, projects.clone());
+                self.project_cache
+                    .insert(CACHE_KEY_PROJECTS, projects.clone());
                 self.projects = projects;
             }
             Err(e) => {
@@ -1044,8 +1055,32 @@ mod tests {
         }));
         let mut app = App::new(fake);
         app.issues = vec![
-            Issue { id: "1".into(), identifier: "JEM-1".into(), title: "Alpha".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
-            Issue { id: "2".into(), identifier: "JEM-2".into(), title: "Beta".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
+            Issue {
+                id: "1".into(),
+                identifier: "JEM-1".into(),
+                title: "Alpha".into(),
+                url: None,
+                state: None,
+                priority: None,
+                project: None,
+                description: None,
+                assignee: None,
+                labels: None,
+                comments: None,
+            },
+            Issue {
+                id: "2".into(),
+                identifier: "JEM-2".into(),
+                title: "Beta".into(),
+                url: None,
+                state: None,
+                priority: None,
+                project: None,
+                description: None,
+                assignee: None,
+                labels: None,
+                comments: None,
+            },
         ];
         app.selected = 1; // JEM-2 selected
 
@@ -1066,8 +1101,32 @@ mod tests {
         }));
         let mut app = App::new(fake);
         app.issues = vec![
-            Issue { id: "1".into(), identifier: "JEM-1".into(), title: "Alpha".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
-            Issue { id: "2".into(), identifier: "JEM-2".into(), title: "Beta".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
+            Issue {
+                id: "1".into(),
+                identifier: "JEM-1".into(),
+                title: "Alpha".into(),
+                url: None,
+                state: None,
+                priority: None,
+                project: None,
+                description: None,
+                assignee: None,
+                labels: None,
+                comments: None,
+            },
+            Issue {
+                id: "2".into(),
+                identifier: "JEM-2".into(),
+                title: "Beta".into(),
+                url: None,
+                state: None,
+                priority: None,
+                project: None,
+                description: None,
+                assignee: None,
+                labels: None,
+                comments: None,
+            },
         ];
         app.selected = 1; // JEM-2 selected
 
@@ -1082,9 +1141,19 @@ mod tests {
         // No response enqueued — FakeLinearApi returns null data which yields empty vec,
         // but let's test the error case by not pushing any response (returns empty)
         let mut app = App::new(fake);
-        let original_issues = vec![
-            Issue { id: "1".into(), identifier: "JEM-1".into(), title: "Alpha".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
-        ];
+        let original_issues = vec![Issue {
+            id: "1".into(),
+            identifier: "JEM-1".into(),
+            title: "Alpha".into(),
+            url: None,
+            state: None,
+            priority: None,
+            project: None,
+            description: None,
+            assignee: None,
+            labels: None,
+            comments: None,
+        }];
         app.issues = original_issues.clone();
 
         app.refresh().await;
@@ -1125,9 +1194,24 @@ mod tests {
     fn thread_move_down_and_up() {
         let mut app = app_with_issues();
         app.detail_threads = vec![
-            ThreadSummary { id: "T-1".into(), title: "A".into(), message_count: 1, last_activity_ms: 0 },
-            ThreadSummary { id: "T-2".into(), title: "B".into(), message_count: 2, last_activity_ms: 0 },
-            ThreadSummary { id: "T-3".into(), title: "C".into(), message_count: 3, last_activity_ms: 0 },
+            ThreadSummary {
+                id: "T-1".into(),
+                title: "A".into(),
+                message_count: 1,
+                last_activity_ms: 0,
+            },
+            ThreadSummary {
+                id: "T-2".into(),
+                title: "B".into(),
+                message_count: 2,
+                last_activity_ms: 0,
+            },
+            ThreadSummary {
+                id: "T-3".into(),
+                title: "C".into(),
+                message_count: 3,
+                last_activity_ms: 0,
+            },
         ];
         assert_eq!(app.detail_thread_selected, 0);
         app.thread_move_down();
@@ -1185,8 +1269,18 @@ mod tests {
     fn selected_thread_returns_current_when_threads_focused() {
         let mut app = app_with_issues();
         app.detail_threads = vec![
-            ThreadSummary { id: "T-1".into(), title: "A".into(), message_count: 1, last_activity_ms: 0 },
-            ThreadSummary { id: "T-2".into(), title: "B".into(), message_count: 2, last_activity_ms: 0 },
+            ThreadSummary {
+                id: "T-1".into(),
+                title: "A".into(),
+                message_count: 1,
+                last_activity_ms: 0,
+            },
+            ThreadSummary {
+                id: "T-2".into(),
+                title: "B".into(),
+                message_count: 2,
+                last_activity_ms: 0,
+            },
         ];
         app.detail_section = DetailSection::Threads;
         app.detail_thread_selected = 0;
@@ -1205,11 +1299,7 @@ mod tests {
 
     #[test]
     fn workspace_picker_navigation() {
-        let mut picker = WorkspacePicker::new(vec![
-            "/a".into(),
-            "/b".into(),
-            "/c".into(),
-        ]);
+        let mut picker = WorkspacePicker::new(vec!["/a".into(), "/b".into(), "/c".into()]);
         assert_eq!(picker.selected, 0);
         assert_eq!(picker.selected_workspace(), Some("/a"));
 
@@ -1290,7 +1380,9 @@ mod tests {
                 name: "Alpha Project".into(),
                 state: Some("started".into()),
                 progress: Some(0.5),
-                lead: Some(crate::api::types::IssueUser { name: "Alice".into() }),
+                lead: Some(crate::api::types::IssueUser {
+                    name: "Alice".into(),
+                }),
                 url: Some("https://linear.app/test/project/alpha".into()),
             },
             Project {
@@ -1422,8 +1514,32 @@ mod tests {
     fn project_issue_navigation() {
         let mut app = app_with_projects();
         app.project_issues = vec![
-            Issue { id: "1".into(), identifier: "JEM-1".into(), title: "A".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
-            Issue { id: "2".into(), identifier: "JEM-2".into(), title: "B".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
+            Issue {
+                id: "1".into(),
+                identifier: "JEM-1".into(),
+                title: "A".into(),
+                url: None,
+                state: None,
+                priority: None,
+                project: None,
+                description: None,
+                assignee: None,
+                labels: None,
+                comments: None,
+            },
+            Issue {
+                id: "2".into(),
+                identifier: "JEM-2".into(),
+                title: "B".into(),
+                url: None,
+                state: None,
+                priority: None,
+                project: None,
+                description: None,
+                assignee: None,
+                labels: None,
+                comments: None,
+            },
         ];
         assert_eq!(app.project_issue_selected, 0);
         app.project_issue_move_down();
@@ -1440,9 +1556,45 @@ mod tests {
     fn project_issue_top_and_bottom() {
         let mut app = app_with_projects();
         app.project_issues = vec![
-            Issue { id: "1".into(), identifier: "JEM-1".into(), title: "A".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
-            Issue { id: "2".into(), identifier: "JEM-2".into(), title: "B".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
-            Issue { id: "3".into(), identifier: "JEM-3".into(), title: "C".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
+            Issue {
+                id: "1".into(),
+                identifier: "JEM-1".into(),
+                title: "A".into(),
+                url: None,
+                state: None,
+                priority: None,
+                project: None,
+                description: None,
+                assignee: None,
+                labels: None,
+                comments: None,
+            },
+            Issue {
+                id: "2".into(),
+                identifier: "JEM-2".into(),
+                title: "B".into(),
+                url: None,
+                state: None,
+                priority: None,
+                project: None,
+                description: None,
+                assignee: None,
+                labels: None,
+                comments: None,
+            },
+            Issue {
+                id: "3".into(),
+                identifier: "JEM-3".into(),
+                title: "C".into(),
+                url: None,
+                state: None,
+                priority: None,
+                project: None,
+                description: None,
+                assignee: None,
+                labels: None,
+                comments: None,
+            },
         ];
         app.project_issue_bottom();
         assert_eq!(app.project_issue_selected, 2);
@@ -1454,8 +1606,32 @@ mod tests {
     fn selected_project_issue_returns_correct_issue() {
         let mut app = app_with_projects();
         app.project_issues = vec![
-            Issue { id: "1".into(), identifier: "JEM-1".into(), title: "A".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
-            Issue { id: "2".into(), identifier: "JEM-2".into(), title: "B".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
+            Issue {
+                id: "1".into(),
+                identifier: "JEM-1".into(),
+                title: "A".into(),
+                url: None,
+                state: None,
+                priority: None,
+                project: None,
+                description: None,
+                assignee: None,
+                labels: None,
+                comments: None,
+            },
+            Issue {
+                id: "2".into(),
+                identifier: "JEM-2".into(),
+                title: "B".into(),
+                url: None,
+                state: None,
+                priority: None,
+                project: None,
+                description: None,
+                assignee: None,
+                labels: None,
+                comments: None,
+            },
         ];
         app.project_issue_selected = 1;
         let issue = app.selected_project_issue().unwrap();
@@ -1554,8 +1730,32 @@ mod tests {
         app.view = View::ProjectDetail;
         app.project_selected = 0;
         app.project_issues = vec![
-            Issue { id: "10".into(), identifier: "JEM-10".into(), title: "Project Alpha".into(), url: Some("https://linear.app/test/issue/JEM-10".into()), state: None, priority: Some(2.0), project: None, description: Some("Description 10".into()), assignee: None, labels: None, comments: None },
-            Issue { id: "11".into(), identifier: "JEM-11".into(), title: "Project Beta".into(), url: Some("https://linear.app/test/issue/JEM-11".into()), state: None, priority: Some(3.0), project: None, description: None, assignee: None, labels: None, comments: None },
+            Issue {
+                id: "10".into(),
+                identifier: "JEM-10".into(),
+                title: "Project Alpha".into(),
+                url: Some("https://linear.app/test/issue/JEM-10".into()),
+                state: None,
+                priority: Some(2.0),
+                project: None,
+                description: Some("Description 10".into()),
+                assignee: None,
+                labels: None,
+                comments: None,
+            },
+            Issue {
+                id: "11".into(),
+                identifier: "JEM-11".into(),
+                title: "Project Beta".into(),
+                url: Some("https://linear.app/test/issue/JEM-11".into()),
+                state: None,
+                priority: Some(3.0),
+                project: None,
+                description: None,
+                assignee: None,
+                labels: None,
+                comments: None,
+            },
         ];
         app
     }
@@ -1694,7 +1894,10 @@ mod tests {
         picker.start_typing();
         assert!(picker.typing);
         // Input is seeded with PWD as an absolute path with trailing slash.
-        let pwd = std::env::current_dir().unwrap().to_string_lossy().to_string();
+        let pwd = std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
         assert!(picker.input.starts_with(&pwd));
         assert!(picker.input.ends_with('/'));
     }
@@ -2127,7 +2330,13 @@ mod tests {
         app.load_issues().await;
 
         assert!(app.error.is_some());
-        assert!(app.error.as_ref().unwrap().message.contains("Authentication"));
+        assert!(
+            app.error
+                .as_ref()
+                .unwrap()
+                .message
+                .contains("Authentication")
+        );
     }
 
     #[tokio::test]
@@ -2201,7 +2410,13 @@ mod tests {
         app.load_project_issues().await;
 
         assert!(app.error.is_some());
-        assert!(app.error.as_ref().unwrap().message.contains("Network error"));
+        assert!(
+            app.error
+                .as_ref()
+                .unwrap()
+                .message
+                .contains("Network error")
+        );
     }
 
     // --- AppError classification tests ---
@@ -2266,8 +2481,32 @@ mod tests {
         }));
         let mut app = App::new(fake);
         app.issues = vec![
-            Issue { id: "1".into(), identifier: "JEM-1".into(), title: "Alpha".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
-            Issue { id: "2".into(), identifier: "JEM-2".into(), title: "Beta".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
+            Issue {
+                id: "1".into(),
+                identifier: "JEM-1".into(),
+                title: "Alpha".into(),
+                url: None,
+                state: None,
+                priority: None,
+                project: None,
+                description: None,
+                assignee: None,
+                labels: None,
+                comments: None,
+            },
+            Issue {
+                id: "2".into(),
+                identifier: "JEM-2".into(),
+                title: "Beta".into(),
+                url: None,
+                state: None,
+                priority: None,
+                project: None,
+                description: None,
+                assignee: None,
+                labels: None,
+                comments: None,
+            },
         ];
         app.selected = 1;
 
@@ -2296,7 +2535,8 @@ mod tests {
         assert!(app.project_cache.is_fresh(CACHE_KEY_PROJECTS));
 
         // Enqueue responses for refresh (issues + projects)
-        app.api.push_response(serde_json::json!({"data": { "issues": { "nodes": [] }}}));
+        app.api
+            .push_response(serde_json::json!({"data": { "issues": { "nodes": [] }}}));
         app.api.push_response(proj_fixture);
         app.refresh().await;
 
@@ -2309,12 +2549,17 @@ mod tests {
         let fake = FakeLinearApi::new();
         let mut app = App::new(fake);
         app.projects = vec![Project {
-            id: "old".into(), name: "Old Project".into(),
-            state: None, progress: None, lead: None, url: None,
+            id: "old".into(),
+            name: "Old Project".into(),
+            state: None,
+            progress: None,
+            lead: None,
+            url: None,
         }];
 
         // Enqueue responses for refresh (issues then projects)
-        app.api.push_response(serde_json::json!({"data": { "issues": { "nodes": [] }}}));
+        app.api
+            .push_response(serde_json::json!({"data": { "issues": { "nodes": [] }}}));
         let proj_fixture: serde_json::Value =
             serde_json::from_str(include_str!("../tests/fixtures/projects.json")).unwrap();
         app.api.push_response(proj_fixture);
@@ -2336,11 +2581,18 @@ mod tests {
         assert!(!app.projects.is_empty());
         assert!(app.error.is_none());
 
-        app.api.push_error("HTTP status client error (403 Forbidden)");
+        app.api
+            .push_error("HTTP status client error (403 Forbidden)");
         app.refresh_projects().await;
 
         assert!(app.error.is_some());
-        assert!(app.error.as_ref().unwrap().message.contains("Access denied"));
+        assert!(
+            app.error
+                .as_ref()
+                .unwrap()
+                .message
+                .contains("Access denied")
+        );
         // Projects should still be there (graceful degradation — only cache was invalidated)
         assert!(!app.projects.is_empty());
     }

@@ -73,9 +73,7 @@ pub fn read_thread_summary(path: &Path) -> Result<ThreadSummary> {
 pub fn parse_thread_summary(json: &str) -> Result<ThreadSummary> {
     let raw: RawThread = serde_json::from_str(json)?;
 
-    let title = raw
-        .title
-        .unwrap_or_else(|| "Untitled thread".to_string());
+    let title = raw.title.unwrap_or_else(|| "Untitled thread".to_string());
 
     let message_count = raw.messages.len();
 
@@ -83,9 +81,10 @@ pub fn parse_thread_summary(json: &str) -> Result<ThreadSummary> {
     let last_activity_ms = raw
         .usage_ledger
         .and_then(|ledger| {
-            ledger.events.last().and_then(|e| {
-                chrono_parse_to_ms(&e.timestamp)
-            })
+            ledger
+                .events
+                .last()
+                .and_then(|e| chrono_parse_to_ms(&e.timestamp))
         })
         .unwrap_or(raw.created);
 
@@ -124,7 +123,8 @@ fn chrono_parse_to_ms(s: &str) -> Option<u64> {
 
     // Days from epoch (1970-01-01) using a simplified calculation
     let days = days_from_epoch(year, month, day)?;
-    let total_secs = (days as u64) * 86400 + (hour as u64) * 3600 + (min as u64) * 60 + (sec as u64);
+    let total_secs =
+        (days as u64) * 86400 + (hour as u64) * 3600 + (min as u64) * 60 + (sec as u64);
     Some(total_secs * 1000 + millis)
 }
 
@@ -145,10 +145,7 @@ fn days_from_epoch(year: i64, month: u32, day: u32) -> Option<i64> {
 }
 
 /// Load thread summaries for a list of thread IDs from the given threads directory.
-pub fn load_thread_summaries(
-    threads_dir: &Path,
-    thread_ids: &[String],
-) -> Vec<ThreadSummary> {
+pub fn load_thread_summaries(threads_dir: &Path, thread_ids: &[String]) -> Vec<ThreadSummary> {
     thread_ids
         .iter()
         .filter_map(|id| {
@@ -160,8 +157,8 @@ pub fn load_thread_summaries(
 
 /// Read a single thread by ID from the default Amp threads directory.
 pub fn read_thread(id: &str) -> Result<ThreadSummary> {
-    let threads_dir =
-        amp_threads_dir().ok_or_else(|| anyhow::anyhow!("could not determine Amp threads directory"))?;
+    let threads_dir = amp_threads_dir()
+        .ok_or_else(|| anyhow::anyhow!("could not determine Amp threads directory"))?;
     let path = threads_dir.join(format!("{}.json", id));
     read_thread_summary(&path)
 }
@@ -189,8 +186,8 @@ pub fn snapshot_thread_ids(dir: &Path) -> std::collections::HashSet<String> {
 /// Scans `~/.local/share/amp/threads/*.json` and parses metadata from each file.
 /// Threads that fail to parse are silently skipped.
 pub fn list_threads() -> Result<Vec<ThreadSummary>> {
-    let threads_dir =
-        amp_threads_dir().ok_or_else(|| anyhow::anyhow!("could not determine Amp threads directory"))?;
+    let threads_dir = amp_threads_dir()
+        .ok_or_else(|| anyhow::anyhow!("could not determine Amp threads directory"))?;
     list_threads_in(&threads_dir)
 }
 
@@ -281,13 +278,19 @@ mod tests {
     #[test]
     fn format_relative_time_hours() {
         let two_hours = 2 * 3600 * 1000;
-        assert_eq!(format_relative_time(1000_000 + two_hours, 1000_000), "2h ago");
+        assert_eq!(
+            format_relative_time(1000_000 + two_hours, 1000_000),
+            "2h ago"
+        );
     }
 
     #[test]
     fn format_relative_time_days() {
         let three_days = 3 * 86400 * 1000;
-        assert_eq!(format_relative_time(1000_000 + three_days, 1000_000), "3d ago");
+        assert_eq!(
+            format_relative_time(1000_000 + three_days, 1000_000),
+            "3d ago"
+        );
     }
 
     #[test]
@@ -323,10 +326,7 @@ mod tests {
     #[test]
     fn load_thread_summaries_skips_missing_files() {
         let dir = tempfile::tempdir().unwrap();
-        let summaries = load_thread_summaries(
-            dir.path(),
-            &["T-nonexistent".to_string()],
-        );
+        let summaries = load_thread_summaries(dir.path(), &["T-nonexistent".to_string()]);
         assert!(summaries.is_empty());
     }
 

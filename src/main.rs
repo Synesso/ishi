@@ -10,14 +10,14 @@ use anyhow::Result;
 use api::client::{LinearApi, LinearClient};
 use app::App;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyModifiers},
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
+    event::{self, Event, KeyCode, KeyModifiers},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{prelude::CrosstermBackend, Terminal};
+use ratatui::{Terminal, prelude::CrosstermBackend};
+use std::collections::HashSet;
 use std::io::stdout;
 use std::path::Path;
-use std::collections::HashSet;
 
 /// Perform a full refresh and reload thread data for the selected issue.
 async fn refresh_all(app: &mut App<impl LinearApi>) {
@@ -222,7 +222,12 @@ async fn main() -> Result<()> {
                                 let before_ids = amp::thread::amp_threads_dir()
                                     .map(|d| amp::thread::snapshot_thread_ids(&d))
                                     .unwrap_or_default();
-                                let _ = start_new_thread(&issue_id, &workspace, &before_ids, Some(&context));
+                                let _ = start_new_thread(
+                                    &issue_id,
+                                    &workspace,
+                                    &before_ids,
+                                    Some(&context),
+                                );
                                 terminal.clear()?;
                                 refresh_all(&mut app).await;
                             }
@@ -247,9 +252,7 @@ async fn main() -> Result<()> {
                                 picker.move_up();
                             }
                         }
-                        KeyCode::Backspace
-                            if key.modifiers.contains(KeyModifiers::ALT) =>
-                        {
+                        KeyCode::Backspace if key.modifiers.contains(KeyModifiers::ALT) => {
                             if let Some(ref mut picker) = app.workspace_picker {
                                 picker.delete_path_component();
                             }
@@ -279,7 +282,12 @@ async fn main() -> Result<()> {
                                 let before_ids = amp::thread::amp_threads_dir()
                                     .map(|d| amp::thread::snapshot_thread_ids(&d))
                                     .unwrap_or_default();
-                                let _ = start_new_thread(&issue_id, &workspace, &before_ids, Some(&context));
+                                let _ = start_new_thread(
+                                    &issue_id,
+                                    &workspace,
+                                    &before_ids,
+                                    Some(&context),
+                                );
                                 terminal.clear()?;
                                 refresh_all(&mut app).await;
                             }
@@ -314,18 +322,14 @@ async fn main() -> Result<()> {
                 match key.code {
                     KeyCode::Char('l') => {
                         if let Some(url) = app.selected_issue_url() {
-                            let _ = std::process::Command::new("open")
-                                .arg(&url)
-                                .spawn();
+                            let _ = std::process::Command::new("open").arg(&url).spawn();
                         }
                     }
                     KeyCode::Char('g') => {
                         if let Some(issue) = app.selected_issue() {
                             let issue_id = issue.id.clone();
                             if let Ok(Some(url)) = app.api.fetch_pull_request_url(&issue_id).await {
-                                let _ = std::process::Command::new("open")
-                                    .arg(&url)
-                                    .spawn();
+                                let _ = std::process::Command::new("open").arg(&url).spawn();
                             }
                         }
                     }
@@ -392,9 +396,7 @@ async fn main() -> Result<()> {
                         keys::Action::Help => app.toggle_help(),
                         keys::Action::OpenIn => {
                             if let Some(url) = app.selected_project_url() {
-                                let _ = std::process::Command::new("open")
-                                    .arg(&url)
-                                    .spawn();
+                                let _ = std::process::Command::new("open").arg(&url).spawn();
                             }
                         }
                         _ => {}
