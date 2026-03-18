@@ -1,3 +1,5 @@
+pub mod detail;
+pub mod help;
 pub mod my_issues;
 pub mod project;
-pub mod detail;
+pub mod project_list;

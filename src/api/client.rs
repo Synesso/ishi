@@ -2,9 +2,22 @@ use anyhow::Result;
 use reqwest::Client;
 use serde_json::Value;
 
-use super::types::Issue;
+use super::types::{Issue, Project};
 
 const LINEAR_API_URL: &str = "https://api.linear.app/graphql";
+
+const ISSUE_PR_QUERY: &str = r#"
+query($issueId: String!) {
+  issue(id: $issueId) {
+    attachments {
+      nodes {
+        url
+        sourceType
+      }
+    }
+  }
+}
+"#;
 
 const MY_ISSUES_QUERY: &str = r#"
 query {
@@ -18,9 +31,67 @@ query {
         id
         identifier
         title
+        url
         state { name }
         priority
         project { name }
+        description
+        assignee { name }
+        labels { nodes { name } }
+        comments { nodes { body user { name } createdAt } }
+      }
+    }
+  }
+}
+"#;
+
+const MY_PROJECTS_QUERY: &str = r#"
+query {
+  viewer {
+    teamMemberships {
+      nodes {
+        team {
+          projects(
+            first: 50
+            filter: { state: { nin: ["completed", "canceled"] } }
+            orderBy: updatedAt
+          ) {
+            nodes {
+              id
+              name
+              state
+              progress
+              lead { name }
+              url
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"#;
+
+const PROJECT_ISSUES_QUERY: &str = r#"
+query($projectId: String!) {
+  project(id: $projectId) {
+    issues(
+      first: 50
+      filter: { state: { type: { nin: ["completed", "canceled"] } } }
+      orderBy: updatedAt
+    ) {
+      nodes {
+        id
+        identifier
+        title
+        url
+        state { name }
+        priority
+        project { name }
+        description
+        assignee { name }
+        labels { nodes { name } }
+        comments { nodes { body user { name } createdAt } }
       }
     }
   }
@@ -34,8 +105,18 @@ pub trait LinearApi: Send + Sync {
         variables: Option<Value>,
     ) -> impl std::future::Future<Output = Result<Value>> + Send;
 
-    fn fetch_my_issues(
+    fn fetch_my_issues(&self) -> impl std::future::Future<Output = Result<Vec<Issue>>> + Send;
+
+    fn fetch_pull_request_url(
         &self,
+        issue_id: &str,
+    ) -> impl std::future::Future<Output = Result<Option<String>>> + Send;
+
+    fn fetch_projects(&self) -> impl std::future::Future<Output = Result<Vec<Project>>> + Send;
+
+    fn fetch_project_issues(
+        &self,
+        project_id: &str,
     ) -> impl std::future::Future<Output = Result<Vec<Issue>>> + Send;
 }
 
@@ -76,9 +157,53 @@ impl LinearApi for LinearClient {
 
     async fn fetch_my_issues(&self) -> Result<Vec<Issue>> {
         let resp = self.query(MY_ISSUES_QUERY, None).await?;
-        let issues: Vec<Issue> = serde_json::from_value(
-            resp["data"]["viewer"]["assignedIssues"]["nodes"].clone(),
-        )?;
+        let issues: Vec<Issue> =
+            serde_json::from_value(resp["data"]["viewer"]["assignedIssues"]["nodes"].clone())?;
+        Ok(issues)
+    }
+
+    async fn fetch_pull_request_url(&self, issue_id: &str) -> Result<Option<String>> {
+        let vars = serde_json::json!({ "issueId": issue_id });
+        let resp = self.query(ISSUE_PR_QUERY, Some(vars)).await?;
+        let nodes = &resp["data"]["issue"]["attachments"]["nodes"];
+        if let Some(arr) = nodes.as_array() {
+            for node in arr {
+                if let Some(url) = node["url"].as_str()
+                    && url.contains("github.com")
+                    && url.contains("/pull/")
+                {
+                    return Ok(Some(url.to_string()));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    async fn fetch_projects(&self) -> Result<Vec<Project>> {
+        let resp = self.query(MY_PROJECTS_QUERY, None).await?;
+        let mut projects: Vec<Project> = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
+        if let Some(memberships) = resp["data"]["viewer"]["teamMemberships"]["nodes"].as_array() {
+            for membership in memberships {
+                if let Some(nodes) = membership["team"]["projects"]["nodes"].as_array() {
+                    for node in nodes {
+                        if let Ok(project) = serde_json::from_value::<Project>(node.clone())
+                            && seen_ids.insert(project.id.clone())
+                        {
+                            projects.push(project);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(projects)
+    }
+
+    async fn fetch_project_issues(&self, project_id: &str) -> Result<Vec<Issue>> {
+        let vars = serde_json::json!({ "projectId": project_id });
+        let resp = self.query(PROJECT_ISSUES_QUERY, Some(vars)).await?;
+        let issues: Vec<Issue> =
+            serde_json::from_value(resp["data"]["project"]["issues"]["nodes"].clone())?;
         Ok(issues)
     }
 }

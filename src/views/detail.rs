@@ -1,13 +1,14 @@
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
-    Frame,
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
+use crate::amp::state::SessionRunStatus;
 use crate::api::client::LinearApi;
-use crate::app::App;
+use crate::app::{App, DetailSection};
 
 pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
     let issue = match app.selected_issue() {
@@ -38,10 +39,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
         Span::raw(issue.project_str()),
     ]));
 
-    let assignee = issue
-        .assignee
-        .as_ref()
-        .map_or("—", |a| a.name.as_str());
+    let assignee = issue.assignee.as_ref().map_or("—", |a| a.name.as_str());
     meta_lines.push(Line::from(vec![
         Span::styled("Assignee: ", label_style),
         Span::raw(assignee),
@@ -68,9 +66,19 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
     // +2 for the border top/bottom
     let meta_height = (meta_lines.len() as u16) + 2;
 
+    // Calculate thread section height
+    let thread_count = app.detail_threads.len();
+    let threads_height = if thread_count > 0 {
+        // header border (1) + each thread line (1 each) + bottom border (1)
+        (thread_count as u16) + 2
+    } else {
+        0
+    };
+
     let chunks = Layout::vertical([
         Constraint::Length(meta_height),
         Constraint::Min(0),
+        Constraint::Length(threads_height),
         Constraint::Length(1),
     ])
     .split(area);
@@ -78,13 +86,15 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
     // Metadata box
     let title = Line::from(vec![
         Span::styled(
-            format!("{}", issue.identifier),
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            issue.identifier.to_string(),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw(format!(" — {}", issue.title)),
     ]);
-    let meta = Paragraph::new(meta_lines)
-        .block(Block::default().borders(Borders::ALL).title(title));
+    let meta =
+        Paragraph::new(meta_lines).block(Block::default().borders(Borders::ALL).title(title));
     frame.render_widget(meta, chunks[0]);
 
     // Description / Comments
@@ -97,37 +107,36 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
     }
 
     // Comments
-    if let Some(comments) = &issue.comments {
-        if !comments.nodes.is_empty() {
-            if !body_lines.is_empty() {
-                body_lines.push(Line::raw(""));
-            }
-            body_lines.push(Line::from(Span::styled(
-                format!("Comments ({})", comments.nodes.len()),
-                Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-            )));
+    if let Some(comments) = &issue.comments
+        && !comments.nodes.is_empty()
+    {
+        if !body_lines.is_empty() {
             body_lines.push(Line::raw(""));
+        }
+        body_lines.push(Line::from(Span::styled(
+            format!("Comments ({})", comments.nodes.len()),
+            Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+        )));
+        body_lines.push(Line::raw(""));
 
-            for comment in &comments.nodes {
-                let author = comment
-                    .user
-                    .as_ref()
-                    .map_or("Unknown", |u| u.name.as_str());
-                body_lines.push(Line::from(vec![
-                    Span::styled(
-                        author,
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        format!("  {}", &comment.created_at[..10]),
-                        Style::default().fg(Color::DarkGray),
-                    ),
-                ]));
-                for line in comment.body.lines() {
-                    body_lines.push(Line::raw(format!("  {}", line)));
-                }
-                body_lines.push(Line::raw(""));
+        for comment in &comments.nodes {
+            let author = comment.user.as_ref().map_or("Unknown", |u| u.name.as_str());
+            body_lines.push(Line::from(vec![
+                Span::styled(
+                    author,
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("  {}", &comment.created_at[..10]),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]));
+            for line in comment.body.lines() {
+                body_lines.push(Line::raw(format!("  {}", line)));
             }
+            body_lines.push(Line::raw(""));
         }
     }
 
@@ -135,8 +144,20 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
     let inner_height = chunks[1].height.saturating_sub(2); // borders
     let scroll = app.detail_scroll;
 
+    let body_focused = app.detail_section == DetailSection::Body;
+    let body_border_style = if body_focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
     let detail = Paragraph::new(body_lines)
-        .block(Block::default().borders(Borders::ALL).title("Description"))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Description")
+                .border_style(body_border_style),
+        )
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
 
@@ -144,25 +165,203 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
 
     app.detail_scroll_max = content_lines.saturating_sub(inner_height);
 
+    // Threads section
+    if thread_count > 0 {
+        let threads_focused = app.detail_section == DetailSection::Threads;
+        let threads_border_style = if threads_focused {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+
+        let thread_lines: Vec<Line> = app
+            .detail_threads
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                let is_selected = threads_focused && i == app.detail_thread_selected;
+                let style = if is_selected {
+                    Style::default().add_modifier(Modifier::REVERSED)
+                } else {
+                    Style::default()
+                };
+                let time_str = t.relative_time();
+                let mut spans = vec![
+                    Span::styled(format!("  {} ", t.title), style),
+                    Span::styled(
+                        format!("({} msgs) ", t.message_count),
+                        style.fg(Color::DarkGray),
+                    ),
+                    Span::styled(time_str, style.fg(Color::DarkGray)),
+                ];
+                if let Some(status) = app.run_status_for_thread(&t.id) {
+                    spans.push(Span::raw(" "));
+                    spans.push(Span::styled(
+                        format!("[{}]", status.label()),
+                        run_status_style(status),
+                    ));
+                }
+                Line::from(spans)
+            })
+            .collect();
+
+        let (running, pending) = app.active_run_counts();
+        let threads_title = if running > 0 || pending > 0 {
+            let mut parts = vec![format!("Threads ({})", thread_count)];
+            if running > 0 {
+                parts.push(format!("{} running", running));
+            }
+            if pending > 0 {
+                parts.push(format!("{} pending", pending));
+            }
+            parts.join(" · ")
+        } else {
+            format!("Threads ({})", thread_count)
+        };
+
+        let threads_block = Paragraph::new(thread_lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(threads_title)
+                .border_style(threads_border_style),
+        );
+        frame.render_widget(threads_block, chunks[2]);
+    }
+
     // Status bar
-    let key_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+    let key_style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
     let bar = if app.awaiting_quit {
         Line::from(vec![
             Span::raw("Press "),
             Span::styled("q", key_style),
             Span::raw(" again to quit"),
         ])
-    } else {
+    } else if app.awaiting_open {
         Line::from(vec![
-            Span::styled("Esc", key_style),
-            Span::raw(" back  "),
-            Span::styled("j", key_style),
-            Span::raw("/"),
-            Span::styled("k", key_style),
-            Span::raw(" scroll"),
+            Span::raw("open in: "),
+            Span::styled("l", key_style),
+            Span::raw("inear  "),
+            Span::styled("g", key_style),
+            Span::raw("ithub PR"),
         ])
+    } else if app.awaiting_thread_run_mode {
+        Line::from(vec![
+            Span::raw("run thread: "),
+            Span::styled("f", key_style),
+            Span::raw("oreground  "),
+            Span::styled("b", key_style),
+            Span::raw("ackground"),
+        ])
+    } else if app.detail_section == DetailSection::Threads {
+        let mut spans = vec![Span::styled("Esc", key_style), Span::raw(" back")];
+        if app.detail_threads.len() > 1 {
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled("j", key_style));
+            spans.push(Span::raw("/"));
+            spans.push(Span::styled("k", key_style));
+            spans.push(Span::raw(" navigate"));
+        }
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled("Enter", key_style));
+        spans.push(Span::raw(" choose run mode  "));
+        if app.selected_thread_run().is_some() {
+            spans.push(Span::styled("l", key_style));
+            spans.push(Span::raw(" log  "));
+            spans.push(Span::styled("R", key_style));
+            spans.push(Span::raw(" retry  "));
+            spans.push(Span::styled("x", key_style));
+            spans.push(Span::raw(" stale  "));
+        }
+        spans.push(Span::styled("a", key_style));
+        spans.push(Span::raw(" new thread"));
+        Line::from(spans)
+    } else {
+        let can_scroll = content_lines > inner_height;
+        let mut spans = vec![Span::styled("Esc", key_style), Span::raw(" back")];
+        if can_scroll {
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled("j", key_style));
+            spans.push(Span::raw("/"));
+            spans.push(Span::styled("k", key_style));
+            spans.push(Span::raw(" scroll"));
+        }
+        if !app.detail_threads.is_empty() {
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled("Tab", key_style));
+            spans.push(Span::raw(" threads"));
+        }
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled("a", key_style));
+        spans.push(Span::raw(" new thread"));
+        Line::from(spans)
     };
-    frame.render_widget(Paragraph::new(bar), chunks[2]);
+    frame.render_widget(Paragraph::new(bar), chunks[3]);
+
+    // Workspace picker modal
+    if let Some(ref picker) = app.workspace_picker {
+        // Extra line for the input row when typing, or the hint row
+        let extra_lines: u16 = 1;
+        let content_lines = picker.options.len() as u16 + extra_lines;
+        let picker_height = (content_lines + 2).min(area.height.saturating_sub(4));
+        let input_width = if picker.typing {
+            // " " + input + "▏" + "  tab to complete"
+            picker.input.len() as u16 + 21
+        } else {
+            0
+        };
+        let picker_width = picker
+            .options
+            .iter()
+            .map(|s| s.len() as u16)
+            .max()
+            .unwrap_or(20)
+            .max(input_width)
+            .max(20)
+            + 4;
+        let picker_width = picker_width.min(area.width.saturating_sub(4));
+
+        let x = area.x + (area.width.saturating_sub(picker_width)) / 2;
+        let y = area.y + (area.height.saturating_sub(picker_height)) / 2;
+        let popup_area = Rect::new(x, y, picker_width, picker_height);
+
+        frame.render_widget(Clear, popup_area);
+
+        let mut lines: Vec<Line> = picker
+            .options
+            .iter()
+            .enumerate()
+            .map(|(i, ws)| {
+                let style = if i == picker.selected {
+                    Style::default().add_modifier(Modifier::REVERSED)
+                } else {
+                    Style::default()
+                };
+                Line::from(Span::styled(format!(" {} ", ws), style))
+            })
+            .collect();
+
+        if picker.typing {
+            lines.push(Line::from(vec![
+                Span::raw(" "),
+                Span::styled(&picker.input, Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw("▏"),
+                Span::styled("  tab to complete", Style::default().fg(Color::DarkGray)),
+            ]));
+        } else {
+            let key_style = Style::default().fg(Color::DarkGray);
+            lines.push(Line::from(Span::styled(" / to type a path", key_style)));
+        }
+
+        let popup = Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Select workspace")
+                .border_style(Style::default().fg(Color::Cyan)),
+        );
+        frame.render_widget(popup, popup_area);
+    }
 }
 
 fn status_style(status: &str) -> Style {
@@ -184,5 +383,44 @@ fn priority_style(priority: &str) -> Style {
         "Medium" => Style::default().fg(Color::Yellow),
         "Low" => Style::default().fg(Color::DarkGray),
         _ => Style::default(),
+    }
+}
+
+fn run_status_style(status: SessionRunStatus) -> Style {
+    match status {
+        SessionRunStatus::Running => Style::default().fg(Color::Green),
+        SessionRunStatus::Pending => Style::default().fg(Color::Yellow),
+        SessionRunStatus::Failed => Style::default().fg(Color::Red),
+        SessionRunStatus::Stale => Style::default().fg(Color::DarkGray),
+        SessionRunStatus::Completed => Style::default().fg(Color::Cyan),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_status_style_projects_each_lifecycle_state() {
+        assert_eq!(
+            run_status_style(SessionRunStatus::Running).fg,
+            Some(Color::Green)
+        );
+        assert_eq!(
+            run_status_style(SessionRunStatus::Pending).fg,
+            Some(Color::Yellow)
+        );
+        assert_eq!(
+            run_status_style(SessionRunStatus::Failed).fg,
+            Some(Color::Red)
+        );
+        assert_eq!(
+            run_status_style(SessionRunStatus::Stale).fg,
+            Some(Color::DarkGray)
+        );
+        assert_eq!(
+            run_status_style(SessionRunStatus::Completed).fg,
+            Some(Color::Cyan)
+        );
     }
 }

@@ -6,17 +6,27 @@
           "id": "issue-1",
           "identifier": "JEM-1",
           "title": "First issue",
+          "url": "https://linear.app/test/issue/JEM-1",
           "state": { "name": "In Progress" },
           "priority": 2.0,
-          "project": { "name": "Alpha" }
+          "project": { "name": "Alpha" },
+          "description": "This is the first issue description.",
+          "assignee": { "name": "Jem" },
+          "labels": { "nodes": [{ "name": "bug" }] },
+          "comments": { "nodes": [{ "body": "Working on it", "user": { "name": "Jem" }, "createdAt": "2026-03-18T01:00:00Z" }] }
         },
         {
           "id": "issue-2",
           "identifier": "JEM-2",
           "title": "Second issue",
+          "url": "https://linear.app/test/issue/JEM-2",
           "state": { "name": "Todo" },
           "priority": 3.0,
-          "project": null
+          "project": null,
+          "description": null,
+          "assignee": null,
+          "labels": { "nodes": [] },
+          "comments": { "nodes": [] }
         }
       ]
     }

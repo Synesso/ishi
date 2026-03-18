@@ -1,0 +1,24 @@
+{
+  "data": {
+    "projects": {
+      "nodes": [
+        {
+          "id": "proj-1",
+          "name": "Alpha Project",
+          "state": "started",
+          "progress": 0.5,
+          "lead": { "name": "Alice" },
+          "url": "https://linear.app/test/project/alpha"
+        },
+        {
+          "id": "proj-2",
+          "name": "Beta Project",
+          "state": "planned",
+          "progress": 0.0,
+          "lead": null,
+          "url": "https://linear.app/test/project/beta"
+        }
+      ]
+    }
+  }
+}

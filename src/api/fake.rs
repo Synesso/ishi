@@ -4,28 +4,47 @@ use std::collections::VecDeque;
 use std::sync::Mutex;
 
 use super::client::LinearApi;
-use super::types::Issue;
+use super::types::{Issue, Project};
 
 /// A fake Linear API client for tests and offline development.
 /// Enqueue responses with `push_response`, and they'll be returned in order by `query`.
+/// PR URL responses are enqueued separately with `push_pr_url`.
+/// Enqueue errors with `push_error` to simulate API failures.
 pub struct FakeLinearApi {
     responses: Mutex<VecDeque<Value>>,
+    pr_urls: Mutex<VecDeque<Option<String>>>,
+    errors: Mutex<VecDeque<String>>,
 }
 
 impl FakeLinearApi {
     pub fn new() -> Self {
         Self {
             responses: Mutex::new(VecDeque::new()),
+            pr_urls: Mutex::new(VecDeque::new()),
+            errors: Mutex::new(VecDeque::new()),
         }
     }
 
     pub fn push_response(&self, response: Value) {
         self.responses.lock().unwrap().push_back(response);
     }
+
+    #[allow(dead_code)]
+    pub fn push_pr_url(&self, url: Option<String>) {
+        self.pr_urls.lock().unwrap().push_back(url);
+    }
+
+    #[allow(dead_code)]
+    pub fn push_error(&self, message: impl Into<String>) {
+        self.errors.lock().unwrap().push_back(message.into());
+    }
 }
 
 impl LinearApi for FakeLinearApi {
     async fn query(&self, _query: &str, _variables: Option<Value>) -> Result<Value> {
+        if let Some(err_msg) = self.errors.lock().unwrap().pop_front() {
+            return Err(anyhow::anyhow!("{}", err_msg));
+        }
         let response = self
             .responses
             .lock()
@@ -38,6 +57,30 @@ impl LinearApi for FakeLinearApi {
     async fn fetch_my_issues(&self) -> Result<Vec<Issue>> {
         let resp = self.query("", None).await?;
         let nodes = &resp["data"]["issues"]["nodes"];
+        if nodes.is_null() {
+            return Ok(vec![]);
+        }
+        let issues: Vec<Issue> = serde_json::from_value(nodes.clone())?;
+        Ok(issues)
+    }
+
+    async fn fetch_pull_request_url(&self, _issue_id: &str) -> Result<Option<String>> {
+        Ok(self.pr_urls.lock().unwrap().pop_front().flatten())
+    }
+
+    async fn fetch_projects(&self) -> Result<Vec<Project>> {
+        let resp = self.query("", None).await?;
+        let nodes = &resp["data"]["projects"]["nodes"];
+        if nodes.is_null() {
+            return Ok(vec![]);
+        }
+        let projects: Vec<Project> = serde_json::from_value(nodes.clone())?;
+        Ok(projects)
+    }
+
+    async fn fetch_project_issues(&self, _project_id: &str) -> Result<Vec<Issue>> {
+        let resp = self.query("", None).await?;
+        let nodes = &resp["data"]["project"]["issues"]["nodes"];
         if nodes.is_null() {
             return Ok(vec![]);
         }
@@ -88,5 +131,69 @@ mod tests {
         let fake = FakeLinearApi::new();
         let issues = fake.fetch_my_issues().await.unwrap();
         assert!(issues.is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetch_pull_request_url_returns_enqueued_url() {
+        let fake = FakeLinearApi::new();
+        fake.push_pr_url(Some("https://github.com/org/repo/pull/42".into()));
+
+        let url = fake.fetch_pull_request_url("issue-1").await.unwrap();
+        assert_eq!(url, Some("https://github.com/org/repo/pull/42".into()));
+    }
+
+    #[tokio::test]
+    async fn fetch_pull_request_url_returns_none_when_empty() {
+        let fake = FakeLinearApi::new();
+        let url = fake.fetch_pull_request_url("issue-1").await.unwrap();
+        assert!(url.is_none());
+    }
+
+    #[tokio::test]
+    async fn fetch_projects_from_fixture() {
+        let fake = FakeLinearApi::new();
+        let fixture: Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/projects.json")).unwrap();
+        fake.push_response(fixture);
+
+        let projects = fake.fetch_projects().await.unwrap();
+        assert_eq!(projects.len(), 2);
+        assert_eq!(projects[0].name, "Alpha Project");
+        assert_eq!(projects[1].name, "Beta Project");
+    }
+
+    #[tokio::test]
+    async fn fetch_projects_empty_when_no_data() {
+        let fake = FakeLinearApi::new();
+        let projects = fake.fetch_projects().await.unwrap();
+        assert!(projects.is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetch_project_issues_from_fixture() {
+        let fake = FakeLinearApi::new();
+        let fixture: Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/project_issues.json")).unwrap();
+        fake.push_response(fixture);
+
+        let issues = fake.fetch_project_issues("proj-1").await.unwrap();
+        assert_eq!(issues.len(), 2);
+        assert_eq!(issues[0].identifier, "JEM-10");
+    }
+
+    #[tokio::test]
+    async fn fetch_project_issues_empty_when_no_data() {
+        let fake = FakeLinearApi::new();
+        let issues = fake.fetch_project_issues("proj-1").await.unwrap();
+        assert!(issues.is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetch_pull_request_url_returns_none_explicitly() {
+        let fake = FakeLinearApi::new();
+        fake.push_pr_url(None);
+
+        let url = fake.fetch_pull_request_url("issue-1").await.unwrap();
+        assert!(url.is_none());
     }
 }

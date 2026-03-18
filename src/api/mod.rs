@@ -1,3 +1,4 @@
+pub mod cache;
 pub mod client;
 #[cfg(test)]
 pub mod fake;

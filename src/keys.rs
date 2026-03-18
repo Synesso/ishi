@@ -12,6 +12,14 @@ pub enum Action {
     Search,
     OrderBy,
     FilterBy,
+    Refresh,
+    Tab,
+    NewThread,
+    OpenIn,
+    OpenRunLog,
+    RetryRun,
+    MarkRunStale,
+    Projects,
 }
 
 pub fn map_key(key: KeyEvent) -> Option<Action> {
@@ -26,8 +34,16 @@ pub fn map_key(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Esc) => Some(Action::Back),
         (_, KeyCode::Char('?')) => Some(Action::Help),
         (_, KeyCode::Char('/')) => Some(Action::Search),
-        (_, KeyCode::Char('o')) => Some(Action::OrderBy),
+        (_, KeyCode::Char('s')) => Some(Action::OrderBy),
         (_, KeyCode::Char('f')) => Some(Action::FilterBy),
+        (_, KeyCode::Char('r')) => Some(Action::Refresh),
+        (_, KeyCode::Tab) => Some(Action::Tab),
+        (_, KeyCode::Char('a')) => Some(Action::NewThread),
+        (_, KeyCode::Char('o')) => Some(Action::OpenIn),
+        (_, KeyCode::Char('l')) => Some(Action::OpenRunLog),
+        (KeyModifiers::SHIFT, KeyCode::Char('R')) => Some(Action::RetryRun),
+        (_, KeyCode::Char('x')) => Some(Action::MarkRunStale),
+        (_, KeyCode::Char('p')) => Some(Action::Projects),
         _ => None,
     }
 }
@@ -57,7 +73,10 @@ mod tests {
 
     #[test]
     fn quit_on_q() {
-        assert!(matches!(map_key(key(KeyCode::Char('q'))), Some(Action::Quit)));
+        assert!(matches!(
+            map_key(key(KeyCode::Char('q'))),
+            Some(Action::Quit)
+        ));
     }
 
     #[test]
@@ -70,11 +89,23 @@ mod tests {
 
     #[test]
     fn navigation_keys() {
-        assert!(matches!(map_key(key(KeyCode::Char('j'))), Some(Action::MoveDown)));
-        assert!(matches!(map_key(key(KeyCode::Down)), Some(Action::MoveDown)));
-        assert!(matches!(map_key(key(KeyCode::Char('k'))), Some(Action::MoveUp)));
+        assert!(matches!(
+            map_key(key(KeyCode::Char('j'))),
+            Some(Action::MoveDown)
+        ));
+        assert!(matches!(
+            map_key(key(KeyCode::Down)),
+            Some(Action::MoveDown)
+        ));
+        assert!(matches!(
+            map_key(key(KeyCode::Char('k'))),
+            Some(Action::MoveUp)
+        ));
         assert!(matches!(map_key(key(KeyCode::Up)), Some(Action::MoveUp)));
-        assert!(matches!(map_key(key(KeyCode::Char('g'))), Some(Action::Top)));
+        assert!(matches!(
+            map_key(key(KeyCode::Char('g'))),
+            Some(Action::Top)
+        ));
         assert!(matches!(
             map_key(key_with(KeyCode::Char('G'), KeyModifiers::SHIFT)),
             Some(Action::Bottom)
@@ -85,14 +116,80 @@ mod tests {
     fn action_keys() {
         assert!(matches!(map_key(key(KeyCode::Enter)), Some(Action::Select)));
         assert!(matches!(map_key(key(KeyCode::Esc)), Some(Action::Back)));
-        assert!(matches!(map_key(key(KeyCode::Char('?'))), Some(Action::Help)));
-        assert!(matches!(map_key(key(KeyCode::Char('/'))), Some(Action::Search)));
+        assert!(matches!(
+            map_key(key(KeyCode::Char('?'))),
+            Some(Action::Help)
+        ));
+        assert!(matches!(
+            map_key(key(KeyCode::Char('/'))),
+            Some(Action::Search)
+        ));
+    }
+
+    #[test]
+    fn refresh_on_r() {
+        assert!(matches!(
+            map_key(key(KeyCode::Char('r'))),
+            Some(Action::Refresh)
+        ));
+    }
+
+    #[test]
+    fn tab_maps_to_tab() {
+        assert!(matches!(map_key(key(KeyCode::Tab)), Some(Action::Tab)));
+    }
+
+    #[test]
+    fn new_thread_on_a() {
+        assert!(matches!(
+            map_key(key(KeyCode::Char('a'))),
+            Some(Action::NewThread)
+        ));
+    }
+
+    #[test]
+    fn open_in_on_o() {
+        assert!(matches!(
+            map_key(key(KeyCode::Char('o'))),
+            Some(Action::OpenIn)
+        ));
+    }
+
+    #[test]
+    fn open_run_log_on_l() {
+        assert!(matches!(
+            map_key(key(KeyCode::Char('l'))),
+            Some(Action::OpenRunLog)
+        ));
+    }
+
+    #[test]
+    fn retry_run_on_shift_r() {
+        assert!(matches!(
+            map_key(key_with(KeyCode::Char('R'), KeyModifiers::SHIFT)),
+            Some(Action::RetryRun)
+        ));
+    }
+
+    #[test]
+    fn mark_run_stale_on_x() {
+        assert!(matches!(
+            map_key(key(KeyCode::Char('x'))),
+            Some(Action::MarkRunStale)
+        ));
+    }
+
+    #[test]
+    fn projects_on_p() {
+        assert!(matches!(
+            map_key(key(KeyCode::Char('p'))),
+            Some(Action::Projects)
+        ));
     }
 
     #[test]
     fn unmapped_keys_return_none() {
-        assert!(map_key(key(KeyCode::Char('x'))).is_none());
-        assert!(map_key(key(KeyCode::Tab)).is_none());
+        assert!(map_key(key(KeyCode::Char('z'))).is_none());
         assert!(map_key(key(KeyCode::F(1))).is_none());
     }
 }

@@ -10,21 +10,12 @@ use crate::api::client::LinearApi;
 use crate::app::App;
 
 pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
-    let project_name = app
-        .selected_project()
-        .map(|p| p.name.as_str())
-        .unwrap_or("Project");
-
     if app.loading {
         let loading = Paragraph::new(Line::from(Span::styled(
-            format!("Loading {} issues…", project_name),
+            "Loading projects…",
             Style::default().fg(Color::Yellow),
         )))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(project_name.to_string()),
-        );
+        .block(Block::default().borders(Borders::ALL).title("Projects"));
         frame.render_widget(loading, area);
         return;
     }
@@ -37,43 +28,40 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
     };
 
     let header = Row::new(vec![
-        Cell::from("ID").style(Style::default().add_modifier(Modifier::BOLD)),
-        Cell::from("Title").style(Style::default().add_modifier(Modifier::BOLD)),
+        Cell::from("Name").style(Style::default().add_modifier(Modifier::BOLD)),
         Cell::from("Status").style(Style::default().add_modifier(Modifier::BOLD)),
-        Cell::from("Priority").style(Style::default().add_modifier(Modifier::BOLD)),
-        Cell::from("Assignee").style(Style::default().add_modifier(Modifier::BOLD)),
+        Cell::from("Lead").style(Style::default().add_modifier(Modifier::BOLD)),
+        Cell::from("Progress").style(Style::default().add_modifier(Modifier::BOLD)),
     ]);
 
     let rows: Vec<Row> = app
-        .project_issues
+        .projects
         .iter()
-        .map(|issue| {
+        .map(|project| {
             Row::new(vec![
-                Cell::from(issue.identifier.as_str()),
-                Cell::from(issue.title.as_str()),
+                Cell::from(project.name.as_str()),
                 Cell::from(Span::styled(
-                    issue.status_str(),
-                    status_style(issue.status_str()),
+                    project.status_str(),
+                    project_status_style(project.status_str()),
                 )),
+                Cell::from(project.lead_str()),
                 Cell::from(Span::styled(
-                    issue.priority_str(),
-                    priority_style(issue.priority_str()),
+                    project.progress_percent(),
+                    progress_style(project.progress),
                 )),
-                Cell::from(issue.assignee.as_ref().map_or("—", |a| a.name.as_str())),
             ])
         })
         .collect();
 
-    let title = format!("{} — Issues ({})", project_name, app.project_issues.len());
+    let title = format!("Projects ({})", app.projects.len());
 
     let table = Table::new(
         rows,
         [
-            Constraint::Length(10),
             Constraint::Min(30),
             Constraint::Length(15),
-            Constraint::Length(10),
             Constraint::Length(20),
+            Constraint::Length(10),
         ],
     )
     .header(header)
@@ -81,8 +69,8 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
     .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
     let mut table_state = TableState::default();
-    if !app.project_issues.is_empty() {
-        table_state.select(Some(app.project_issue_selected));
+    if !app.projects.is_empty() {
+        table_state.select(Some(app.project_selected));
     }
 
     frame.render_stateful_widget(table, chunks[0], &mut table_state);
@@ -122,24 +110,22 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
     }
 }
 
-fn status_style(status: &str) -> Style {
+fn project_status_style(status: &str) -> Style {
     match status {
-        "In Progress" => Style::default().fg(Color::Yellow),
-        "Todo" => Style::default().fg(Color::Cyan),
-        "Done" => Style::default().fg(Color::Green),
-        "Canceled" | "Cancelled" => Style::default().fg(Color::DarkGray),
-        "In Review" => Style::default().fg(Color::Magenta),
-        "Backlog" | "Triage" => Style::default().fg(Color::DarkGray),
+        "planned" => Style::default().fg(Color::Cyan),
+        "started" | "backlog" => Style::default().fg(Color::Yellow),
+        "paused" => Style::default().fg(Color::DarkGray),
+        "completed" => Style::default().fg(Color::Green),
+        "canceled" | "cancelled" => Style::default().fg(Color::DarkGray),
         _ => Style::default(),
     }
 }
 
-fn priority_style(priority: &str) -> Style {
-    match priority {
-        "Urgent" => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-        "High" => Style::default().fg(Color::Red),
-        "Medium" => Style::default().fg(Color::Yellow),
-        "Low" => Style::default().fg(Color::DarkGray),
-        _ => Style::default(),
+fn progress_style(progress: Option<f64>) -> Style {
+    match progress {
+        Some(p) if p >= 0.75 => Style::default().fg(Color::Green),
+        Some(p) if p >= 0.25 => Style::default().fg(Color::Yellow),
+        Some(_) => Style::default().fg(Color::Red),
+        None => Style::default().fg(Color::DarkGray),
     }
 }
