@@ -18,6 +18,15 @@ pub const KEYBINDINGS: &[(&str, &str)] = &[
     ("G", "Go to bottom"),
     ("Enter", "Select / confirm"),
     ("f / b", "Foreground/background run mode (detail)"),
+    (
+        "l",
+        "Open selected thread's latest run log (detail threads)",
+    ),
+    ("R", "Retry selected thread's latest run (detail threads)"),
+    (
+        "x",
+        "Mark selected thread's latest run stale (detail threads)",
+    ),
     ("Esc", "Back / dismiss"),
     ("/", "Search"),
     ("s", "Sort by column"),

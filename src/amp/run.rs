@@ -4,6 +4,9 @@ use std::process::{Command, Stdio};
 
 use crate::amp::state::{SessionRun, SessionRunStatus};
 
+/// Log-line prefix appended when a background run exits.
+pub const EXIT_CODE_MARKER_PREFIX: &str = "__ISHI_EXIT_CODE__=";
+
 /// Result of launching a background Amp run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchedRun {
@@ -21,11 +24,33 @@ pub fn launch_thread_continue_background(
     workspace: &Path,
     prompt: &str,
 ) -> Result<LaunchedRun> {
-    let now_ms = now_ms();
+    launch_thread_continue_background_with(
+        thread_id,
+        issue_identifier,
+        workspace,
+        prompt,
+        now_ms(),
+        |args, working_dir, log_path| {
+            spawn_background_command_to_log("amp", args, working_dir, log_path)
+        },
+    )
+}
+
+fn launch_thread_continue_background_with<F>(
+    thread_id: &str,
+    issue_identifier: &str,
+    workspace: &Path,
+    prompt: &str,
+    now_ms: u64,
+    mut spawn: F,
+) -> Result<LaunchedRun>
+where
+    F: FnMut(&[String], &Path, &Path) -> Result<u32>,
+{
     let run_id = build_run_id(thread_id, now_ms);
     let log_path = run_log_path(&run_id)?;
     let args = build_continue_args(thread_id, prompt);
-    let pid = spawn_background_command_to_log("amp", &args, workspace, &log_path)?;
+    let pid = spawn(&args, workspace, &log_path)?;
 
     let run = SessionRun {
         thread_id: thread_id.to_string(),
@@ -53,6 +78,15 @@ pub fn build_run_id(thread_id: &str, created_at_ms: u64) -> String {
 pub fn run_log_path(run_id: &str) -> Result<PathBuf> {
     let dir = run_logs_dir()?;
     Ok(dir.join(format!("{run_id}.log")))
+}
+
+/// Parse the latest exit-code marker from run log contents.
+pub fn exit_code_from_log_contents(contents: &str) -> Option<i32> {
+    contents.lines().rev().find_map(|line| {
+        line.trim()
+            .strip_prefix(EXIT_CODE_MARKER_PREFIX)
+            .and_then(|value| value.parse::<i32>().ok())
+    })
 }
 
 fn build_continue_args(thread_id: &str, prompt: &str) -> Vec<String> {
@@ -103,7 +137,33 @@ pub fn spawn_background_command_to_log(
             )
         })?;
 
-    Ok(child.id())
+    let pid = child.id();
+    spawn_exit_marker_writer(child, log_path.to_path_buf());
+
+    Ok(pid)
+}
+
+fn spawn_exit_marker_writer(mut child: std::process::Child, log_path: PathBuf) {
+    let _ = std::thread::Builder::new()
+        .name("ishi-run-exit-marker".to_string())
+        .spawn(move || {
+            if let Ok(status) = child.wait() {
+                let exit_code = status.code().unwrap_or(1);
+                let _ = append_exit_code_marker(&log_path, exit_code);
+            }
+        });
+}
+
+fn append_exit_code_marker(log_path: &Path, exit_code: i32) -> Result<()> {
+    use std::io::Write;
+
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+        .with_context(|| format!("failed to append exit marker at {}", log_path.display()))?;
+    writeln!(file, "{EXIT_CODE_MARKER_PREFIX}{exit_code}")?;
+    Ok(())
 }
 
 fn run_logs_dir() -> Result<PathBuf> {
@@ -163,6 +223,70 @@ mod tests {
     }
 
     #[test]
+    fn launch_thread_continue_background_populates_run_metadata() {
+        let workspace = Path::new("/tmp/ishi-workspace");
+        let prompt = "continue this task";
+        let mut captured_args: Option<Vec<String>> = None;
+
+        let launched = launch_thread_continue_background_with(
+            "T-abc",
+            "JEM-104",
+            workspace,
+            prompt,
+            1710000000000,
+            |args, working_dir, log_path| {
+                captured_args = Some(args.to_vec());
+                assert_eq!(working_dir, workspace);
+                assert!(
+                    log_path
+                        .to_string_lossy()
+                        .ends_with("run-1710000000000-T-abc.log")
+                );
+                Ok(4242)
+            },
+        )
+        .unwrap();
+
+        assert_eq!(launched.run_id, "run-1710000000000-T-abc");
+        assert_eq!(launched.run.thread_id, "T-abc");
+        assert_eq!(launched.run.issue, "JEM-104");
+        assert_eq!(launched.run.workspace, "/tmp/ishi-workspace");
+        assert_eq!(launched.run.pid, Some(4242));
+        assert_eq!(launched.run.status, SessionRunStatus::Running);
+        assert_eq!(launched.run.created_at_ms, 1710000000000);
+        assert_eq!(launched.run.updated_at_ms, 1710000000000);
+        assert_eq!(launched.run.started_at_ms, Some(1710000000000));
+        assert_eq!(launched.run.finished_at_ms, None);
+
+        assert_eq!(
+            captured_args.unwrap(),
+            vec![
+                "threads".to_string(),
+                "continue".to_string(),
+                "T-abc".to_string(),
+                "-x".to_string(),
+                "continue this task".to_string(),
+                "--stream-json".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn launch_thread_continue_background_returns_spawn_error() {
+        let result = launch_thread_continue_background_with(
+            "T-abc",
+            "JEM-104",
+            Path::new("/tmp/ishi-workspace"),
+            "continue",
+            1710000000000,
+            |_, _, _| Err(anyhow::anyhow!("spawn failed")),
+        );
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("spawn failed"));
+    }
+
+    #[test]
     fn spawn_background_command_to_log_returns_pid_and_writes_output() {
         let dir = tempfile::tempdir().unwrap();
         let log_path = dir.path().join("run.log");
@@ -182,6 +306,37 @@ mod tests {
         }
 
         assert!(output.contains("hello-from-background"));
+    }
+
+    #[test]
+    fn spawn_background_command_to_log_appends_exit_code_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let log_path = dir.path().join("run.log");
+        let args = vec!["-c".to_string(), "exit 7".to_string()];
+
+        let pid = spawn_background_command_to_log("sh", &args, dir.path(), &log_path).unwrap();
+        assert!(pid > 0);
+
+        let mut output = String::new();
+        for _ in 0..100 {
+            output = std::fs::read_to_string(&log_path).unwrap_or_default();
+            if output.contains(&format!("{EXIT_CODE_MARKER_PREFIX}7")) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        assert!(output.contains(&format!("{EXIT_CODE_MARKER_PREFIX}7")));
+        assert_eq!(exit_code_from_log_contents(&output), Some(7));
+    }
+
+    #[test]
+    fn exit_code_from_log_contents_returns_latest_marker() {
+        let contents = format!(
+            "line 1\n{prefix}1\nline 2\n{prefix}0\n",
+            prefix = EXIT_CODE_MARKER_PREFIX
+        );
+        assert_eq!(exit_code_from_log_contents(contents.as_str()), Some(0));
     }
 
     #[test]

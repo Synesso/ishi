@@ -16,6 +16,9 @@ pub enum Action {
     Tab,
     NewThread,
     OpenIn,
+    OpenRunLog,
+    RetryRun,
+    MarkRunStale,
     Projects,
 }
 
@@ -37,6 +40,9 @@ pub fn map_key(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Tab) => Some(Action::Tab),
         (_, KeyCode::Char('a')) => Some(Action::NewThread),
         (_, KeyCode::Char('o')) => Some(Action::OpenIn),
+        (_, KeyCode::Char('l')) => Some(Action::OpenRunLog),
+        (KeyModifiers::SHIFT, KeyCode::Char('R')) => Some(Action::RetryRun),
+        (_, KeyCode::Char('x')) => Some(Action::MarkRunStale),
         (_, KeyCode::Char('p')) => Some(Action::Projects),
         _ => None,
     }
@@ -150,6 +156,30 @@ mod tests {
     }
 
     #[test]
+    fn open_run_log_on_l() {
+        assert!(matches!(
+            map_key(key(KeyCode::Char('l'))),
+            Some(Action::OpenRunLog)
+        ));
+    }
+
+    #[test]
+    fn retry_run_on_shift_r() {
+        assert!(matches!(
+            map_key(key_with(KeyCode::Char('R'), KeyModifiers::SHIFT)),
+            Some(Action::RetryRun)
+        ));
+    }
+
+    #[test]
+    fn mark_run_stale_on_x() {
+        assert!(matches!(
+            map_key(key(KeyCode::Char('x'))),
+            Some(Action::MarkRunStale)
+        ));
+    }
+
+    #[test]
     fn projects_on_p() {
         assert!(matches!(
             map_key(key(KeyCode::Char('p'))),
@@ -159,7 +189,7 @@ mod tests {
 
     #[test]
     fn unmapped_keys_return_none() {
-        assert!(map_key(key(KeyCode::Char('x'))).is_none());
+        assert!(map_key(key(KeyCode::Char('z'))).is_none());
         assert!(map_key(key(KeyCode::F(1))).is_none());
     }
 }

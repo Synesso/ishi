@@ -1,10 +1,36 @@
 use std::cmp::Ordering;
 use std::time::Duration;
 
+use crate::amp::state::SessionRunStatus;
 use crate::amp::thread::ThreadSummary;
 use crate::api::cache::ResponseCache;
 use crate::api::client::LinearApi;
 use crate::api::types::{Issue, Project};
+
+/// Lightweight summary of a session run for display in the TUI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionRunSummary {
+    pub run_id: String,
+    pub thread_id: String,
+    pub status: SessionRunStatus,
+    pub log_path: Option<String>,
+    pub created_at_ms: u64,
+}
+
+/// Pick the more prominent of two statuses for display purposes.
+/// Running > Pending > Failed > Stale > Completed.
+fn pick_display_status(a: SessionRunStatus, b: SessionRunStatus) -> SessionRunStatus {
+    fn rank(s: SessionRunStatus) -> u8 {
+        match s {
+            SessionRunStatus::Running => 4,
+            SessionRunStatus::Pending => 3,
+            SessionRunStatus::Failed => 2,
+            SessionRunStatus::Stale => 1,
+            SessionRunStatus::Completed => 0,
+        }
+    }
+    if rank(b) > rank(a) { b } else { a }
+}
 
 const CACHE_TTL_SECS: u64 = 300; // 5 minutes
 const CACHE_KEY_MY_ISSUES: &str = "my_issues";
@@ -284,6 +310,7 @@ pub struct App<A: LinearApi> {
     pub detail_section: DetailSection,
     pub detail_threads: Vec<ThreadSummary>,
     pub detail_thread_selected: usize,
+    pub detail_session_runs: Vec<SessionRunSummary>,
     pub workspace_picker: Option<WorkspacePicker>,
     pub show_help: bool,
     pub cache: ResponseCache<Vec<Issue>>,
@@ -324,6 +351,7 @@ impl<A: LinearApi> App<A> {
             detail_section: DetailSection::Body,
             detail_threads: Vec::new(),
             detail_thread_selected: 0,
+            detail_session_runs: Vec::new(),
             workspace_picker: None,
             show_help: false,
             cache: ResponseCache::new(Duration::from_secs(CACHE_TTL_SECS)),
@@ -487,6 +515,7 @@ impl<A: LinearApi> App<A> {
         self.detail_section = DetailSection::Body;
         self.detail_threads.clear();
         self.detail_thread_selected = 0;
+        self.detail_session_runs.clear();
     }
 
     pub fn selected_issue(&self) -> Option<&Issue> {
@@ -522,6 +551,50 @@ impl<A: LinearApi> App<A> {
         } else {
             None
         }
+    }
+
+    /// Return the newest run summary for a given thread.
+    pub fn latest_run_for_thread(&self, thread_id: &str) -> Option<&SessionRunSummary> {
+        self.detail_session_runs
+            .iter()
+            .filter(|r| r.thread_id == thread_id)
+            .max_by_key(|r| r.created_at_ms)
+    }
+
+    /// Return the newest run summary for the selected thread in the detail threads section.
+    pub fn selected_thread_run(&self) -> Option<&SessionRunSummary> {
+        let thread = self.selected_thread()?;
+        self.latest_run_for_thread(&thread.id)
+    }
+
+    /// Return the most relevant session run status for a given thread ID.
+    /// Prefers active statuses (running > pending) over terminal ones.
+    pub fn run_status_for_thread(&self, thread_id: &str) -> Option<SessionRunStatus> {
+        let mut best: Option<SessionRunStatus> = None;
+        for run in &self.detail_session_runs {
+            if run.thread_id == thread_id {
+                best = Some(match best {
+                    None => run.status,
+                    Some(prev) => pick_display_status(prev, run.status),
+                });
+            }
+        }
+        best
+    }
+
+    /// Return aggregate counts of active (running/pending) runs for the current issue.
+    pub fn active_run_counts(&self) -> (usize, usize) {
+        let running = self
+            .detail_session_runs
+            .iter()
+            .filter(|r| r.status == SessionRunStatus::Running)
+            .count();
+        let pending = self
+            .detail_session_runs
+            .iter()
+            .filter(|r| r.status == SessionRunStatus::Pending)
+            .count();
+        (running, pending)
     }
 
     pub fn focus_threads(&mut self) {
@@ -2603,5 +2676,189 @@ mod tests {
         );
         // Projects should still be there (graceful degradation — only cache was invalidated)
         assert!(!app.projects.is_empty());
+    }
+
+    #[test]
+    fn run_status_for_thread_returns_most_prominent() {
+        let mut app = App::new(FakeLinearApi::new());
+        app.detail_session_runs = vec![
+            SessionRunSummary {
+                run_id: "run-1".to_string(),
+                thread_id: "T-abc".to_string(),
+                status: SessionRunStatus::Completed,
+                log_path: Some("/tmp/run-1.log".to_string()),
+                created_at_ms: 100,
+            },
+            SessionRunSummary {
+                run_id: "run-2".to_string(),
+                thread_id: "T-abc".to_string(),
+                status: SessionRunStatus::Running,
+                log_path: Some("/tmp/run-2.log".to_string()),
+                created_at_ms: 200,
+            },
+        ];
+        assert_eq!(
+            app.run_status_for_thread("T-abc"),
+            Some(SessionRunStatus::Running)
+        );
+    }
+
+    #[test]
+    fn selected_thread_run_returns_newest_for_selected_thread() {
+        let mut app = App::new(FakeLinearApi::new());
+        app.detail_section = DetailSection::Threads;
+        app.detail_threads = vec![
+            ThreadSummary {
+                id: "T-abc".to_string(),
+                title: "A".to_string(),
+                message_count: 1,
+                last_activity_ms: 0,
+            },
+            ThreadSummary {
+                id: "T-def".to_string(),
+                title: "B".to_string(),
+                message_count: 1,
+                last_activity_ms: 0,
+            },
+        ];
+        app.detail_session_runs = vec![
+            SessionRunSummary {
+                run_id: "run-old".to_string(),
+                thread_id: "T-abc".to_string(),
+                status: SessionRunStatus::Failed,
+                log_path: Some("/tmp/run-old.log".to_string()),
+                created_at_ms: 100,
+            },
+            SessionRunSummary {
+                run_id: "run-other".to_string(),
+                thread_id: "T-def".to_string(),
+                status: SessionRunStatus::Running,
+                log_path: Some("/tmp/run-other.log".to_string()),
+                created_at_ms: 150,
+            },
+            SessionRunSummary {
+                run_id: "run-new".to_string(),
+                thread_id: "T-abc".to_string(),
+                status: SessionRunStatus::Completed,
+                log_path: Some("/tmp/run-new.log".to_string()),
+                created_at_ms: 200,
+            },
+        ];
+
+        app.detail_thread_selected = 0;
+        assert_eq!(
+            app.selected_thread_run().map(|r| r.run_id.as_str()),
+            Some("run-new")
+        );
+
+        app.detail_thread_selected = 1;
+        assert_eq!(
+            app.selected_thread_run().map(|r| r.run_id.as_str()),
+            Some("run-other")
+        );
+    }
+
+    #[test]
+    fn run_status_for_thread_returns_none_when_no_runs() {
+        let app = App::new(FakeLinearApi::new());
+        assert_eq!(app.run_status_for_thread("T-xyz"), None);
+    }
+
+    #[test]
+    fn active_run_counts_tallies_running_and_pending() {
+        let mut app = App::new(FakeLinearApi::new());
+        app.detail_session_runs = vec![
+            SessionRunSummary {
+                run_id: "run-1".to_string(),
+                thread_id: "T-a".to_string(),
+                status: SessionRunStatus::Running,
+                log_path: Some("/tmp/run-1.log".to_string()),
+                created_at_ms: 1,
+            },
+            SessionRunSummary {
+                run_id: "run-2".to_string(),
+                thread_id: "T-b".to_string(),
+                status: SessionRunStatus::Pending,
+                log_path: Some("/tmp/run-2.log".to_string()),
+                created_at_ms: 2,
+            },
+            SessionRunSummary {
+                run_id: "run-3".to_string(),
+                thread_id: "T-c".to_string(),
+                status: SessionRunStatus::Completed,
+                log_path: Some("/tmp/run-3.log".to_string()),
+                created_at_ms: 3,
+            },
+            SessionRunSummary {
+                run_id: "run-4".to_string(),
+                thread_id: "T-d".to_string(),
+                status: SessionRunStatus::Running,
+                log_path: Some("/tmp/run-4.log".to_string()),
+                created_at_ms: 4,
+            },
+        ];
+        let (running, pending) = app.active_run_counts();
+        assert_eq!(running, 2);
+        assert_eq!(pending, 1);
+    }
+
+    #[test]
+    fn active_run_counts_zero_when_no_runs() {
+        let app = App::new(FakeLinearApi::new());
+        let (running, pending) = app.active_run_counts();
+        assert_eq!(running, 0);
+        assert_eq!(pending, 0);
+    }
+
+    #[test]
+    fn pick_display_status_prefers_running() {
+        assert_eq!(
+            pick_display_status(SessionRunStatus::Completed, SessionRunStatus::Running),
+            SessionRunStatus::Running
+        );
+        assert_eq!(
+            pick_display_status(SessionRunStatus::Running, SessionRunStatus::Failed),
+            SessionRunStatus::Running
+        );
+    }
+
+    #[test]
+    fn pick_display_status_prefers_pending_over_terminal() {
+        assert_eq!(
+            pick_display_status(SessionRunStatus::Completed, SessionRunStatus::Pending),
+            SessionRunStatus::Pending
+        );
+        assert_eq!(
+            pick_display_status(SessionRunStatus::Failed, SessionRunStatus::Pending),
+            SessionRunStatus::Pending
+        );
+    }
+
+    #[test]
+    fn back_to_list_clears_session_runs() {
+        let mut app = App::new(FakeLinearApi::new());
+        app.issues = vec![Issue {
+            id: "1".into(),
+            identifier: "JEM-1".into(),
+            title: "Test".into(),
+            url: None,
+            state: None,
+            priority: None,
+            project: None,
+            description: None,
+            assignee: None,
+            labels: None,
+            comments: None,
+        }];
+        app.select_issue();
+        app.detail_session_runs = vec![SessionRunSummary {
+            run_id: "run-1".to_string(),
+            thread_id: "T-a".to_string(),
+            status: SessionRunStatus::Running,
+            log_path: Some("/tmp/run-1.log".to_string()),
+            created_at_ms: 1,
+        }];
+        app.back_to_list();
+        assert!(app.detail_session_runs.is_empty());
     }
 }

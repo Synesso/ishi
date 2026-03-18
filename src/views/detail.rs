@@ -6,6 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
+use crate::amp::state::SessionRunStatus;
 use crate::api::client::LinearApi;
 use crate::app::{App, DetailSection};
 
@@ -185,21 +186,43 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
                     Style::default()
                 };
                 let time_str = t.relative_time();
-                Line::from(vec![
+                let mut spans = vec![
                     Span::styled(format!("  {} ", t.title), style),
                     Span::styled(
                         format!("({} msgs) ", t.message_count),
                         style.fg(Color::DarkGray),
                     ),
                     Span::styled(time_str, style.fg(Color::DarkGray)),
-                ])
+                ];
+                if let Some(status) = app.run_status_for_thread(&t.id) {
+                    spans.push(Span::raw(" "));
+                    spans.push(Span::styled(
+                        format!("[{}]", status.label()),
+                        run_status_style(status),
+                    ));
+                }
+                Line::from(spans)
             })
             .collect();
+
+        let (running, pending) = app.active_run_counts();
+        let threads_title = if running > 0 || pending > 0 {
+            let mut parts = vec![format!("Threads ({})", thread_count)];
+            if running > 0 {
+                parts.push(format!("{} running", running));
+            }
+            if pending > 0 {
+                parts.push(format!("{} pending", pending));
+            }
+            parts.join(" · ")
+        } else {
+            format!("Threads ({})", thread_count)
+        };
 
         let threads_block = Paragraph::new(thread_lines).block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(format!("Threads ({})", thread_count))
+                .title(threads_title)
                 .border_style(threads_border_style),
         );
         frame.render_widget(threads_block, chunks[2]);
@@ -243,6 +266,14 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
         spans.push(Span::raw("  "));
         spans.push(Span::styled("Enter", key_style));
         spans.push(Span::raw(" choose run mode  "));
+        if app.selected_thread_run().is_some() {
+            spans.push(Span::styled("l", key_style));
+            spans.push(Span::raw(" log  "));
+            spans.push(Span::styled("R", key_style));
+            spans.push(Span::raw(" retry  "));
+            spans.push(Span::styled("x", key_style));
+            spans.push(Span::raw(" stale  "));
+        }
         spans.push(Span::styled("a", key_style));
         spans.push(Span::raw(" new thread"));
         Line::from(spans)
@@ -352,5 +383,44 @@ fn priority_style(priority: &str) -> Style {
         "Medium" => Style::default().fg(Color::Yellow),
         "Low" => Style::default().fg(Color::DarkGray),
         _ => Style::default(),
+    }
+}
+
+fn run_status_style(status: SessionRunStatus) -> Style {
+    match status {
+        SessionRunStatus::Running => Style::default().fg(Color::Green),
+        SessionRunStatus::Pending => Style::default().fg(Color::Yellow),
+        SessionRunStatus::Failed => Style::default().fg(Color::Red),
+        SessionRunStatus::Stale => Style::default().fg(Color::DarkGray),
+        SessionRunStatus::Completed => Style::default().fg(Color::Cyan),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_status_style_projects_each_lifecycle_state() {
+        assert_eq!(
+            run_status_style(SessionRunStatus::Running).fg,
+            Some(Color::Green)
+        );
+        assert_eq!(
+            run_status_style(SessionRunStatus::Pending).fg,
+            Some(Color::Yellow)
+        );
+        assert_eq!(
+            run_status_style(SessionRunStatus::Failed).fg,
+            Some(Color::Red)
+        );
+        assert_eq!(
+            run_status_style(SessionRunStatus::Stale).fg,
+            Some(Color::DarkGray)
+        );
+        assert_eq!(
+            run_status_style(SessionRunStatus::Completed).fg,
+            Some(Color::Cyan)
+        );
     }
 }

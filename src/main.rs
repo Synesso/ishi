@@ -6,7 +6,7 @@ mod keys;
 mod suspend;
 mod views;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use api::client::{LinearApi, LinearClient};
 use app::App;
 use crossterm::{
@@ -19,8 +19,136 @@ use std::collections::HashSet;
 use std::io::stdout;
 use std::path::Path;
 
+enum ThreadRunModeAction {
+    Foreground {
+        thread_id: String,
+    },
+    Background {
+        thread_id: String,
+        issue: api::types::Issue,
+    },
+}
+
+enum RunManagementAction {
+    OpenLog {
+        log_path: String,
+    },
+    Retry {
+        thread_id: String,
+        issue: api::types::Issue,
+    },
+    MarkStale {
+        run_id: String,
+    },
+}
+
+fn resolve_thread_run_mode_action(
+    app: &App<impl LinearApi>,
+    key_code: KeyCode,
+) -> Option<ThreadRunModeAction> {
+    match key_code {
+        KeyCode::Char('f') => app
+            .selected_thread()
+            .map(|thread| ThreadRunModeAction::Foreground {
+                thread_id: thread.id.clone(),
+            }),
+        KeyCode::Char('b') => {
+            let thread = app.selected_thread()?;
+            let issue = app.selected_issue()?;
+            Some(ThreadRunModeAction::Background {
+                thread_id: thread.id.clone(),
+                issue: issue.clone(),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn resolve_run_management_action(
+    app: &App<impl LinearApi>,
+    action: keys::Action,
+) -> Option<RunManagementAction> {
+    match action {
+        keys::Action::OpenRunLog => {
+            let run = app.selected_thread_run()?;
+            let log_path = run.log_path.clone()?;
+            Some(RunManagementAction::OpenLog { log_path })
+        }
+        keys::Action::RetryRun => {
+            // Retry is intentionally tied to an existing run for the selected thread.
+            app.selected_thread_run()?;
+            let thread = app.selected_thread()?;
+            let issue = app.selected_issue()?;
+            Some(RunManagementAction::Retry {
+                thread_id: thread.id.clone(),
+                issue: issue.clone(),
+            })
+        }
+        keys::Action::MarkRunStale => {
+            let run = app.selected_thread_run()?;
+            Some(RunManagementAction::MarkStale {
+                run_id: run.run_id.clone(),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn mark_session_run_stale(run_id: &str) -> Result<bool> {
+    let state_path = amp::state::state_path()?;
+    let mut state = amp::state::State::load(&state_path)?;
+    let changed = state.mark_session_run_stale(run_id, now_ms());
+    if changed {
+        state.save(&state_path)?;
+    }
+    Ok(changed)
+}
+
+async fn execute_run_management_action(
+    app: &mut App<impl LinearApi>,
+    action: RunManagementAction,
+) -> Result<()> {
+    match action {
+        RunManagementAction::OpenLog { log_path } => {
+            std::process::Command::new("open")
+                .arg(&log_path)
+                .spawn()
+                .with_context(|| format!("failed to open run log at {log_path}"))?;
+        }
+        RunManagementAction::Retry { thread_id, issue } => {
+            launch_background_thread_run(&issue, &thread_id)?;
+            refresh_all(app).await;
+        }
+        RunManagementAction::MarkStale { run_id } => {
+            if mark_session_run_stale(&run_id)? {
+                refresh_all(app).await;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn reconcile_session_runs() -> Result<usize> {
+    let state_path = amp::state::state_path()?;
+    amp::reconcile::reconcile_state_file(&state_path)
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 /// Perform a full refresh and reload thread data for the selected issue.
 async fn refresh_all(app: &mut App<impl LinearApi>) {
+    if let Err(err) = reconcile_session_runs() {
+        app.error = Some(app::AppError::new(format!(
+            "Failed to reconcile background runs: {err}"
+        )));
+        return;
+    }
+
     if let Some(id) = app.refresh().await {
         load_threads_for_issue(app, &id);
     }
@@ -79,6 +207,20 @@ fn load_threads_for_issue(app: &mut App<impl LinearApi>, identifier: &str) {
         Ok(s) => s,
         Err(_) => return,
     };
+
+    // Load session run summaries for this issue
+    app.detail_session_runs = state
+        .runs_for_issue(identifier)
+        .into_iter()
+        .map(|(run_id, run)| app::SessionRunSummary {
+            run_id: run_id.to_string(),
+            thread_id: run.thread_id.clone(),
+            status: run.status,
+            log_path: run.log_path.clone(),
+            created_at_ms: run.created_at_ms,
+        })
+        .collect();
+
     let thread_ids: Vec<String> = state
         .threads_for_issue(identifier)
         .into_iter()
@@ -186,6 +328,11 @@ async fn main() -> Result<()> {
 
     // Fetch issues before entering TUI (populates cache)
     app.load_issues().await;
+    if let Err(err) = reconcile_session_runs() {
+        app.error = Some(app::AppError::new(format!(
+            "Failed to reconcile background runs: {err}"
+        )));
+    }
 
     // Terminal setup
     enable_raw_mode()?;
@@ -377,33 +524,25 @@ async fn main() -> Result<()> {
                 }
             } else if app.awaiting_thread_run_mode {
                 app.awaiting_thread_run_mode = false;
-                match key.code {
-                    KeyCode::Char('f') => {
-                        if let Some(thread) = app.selected_thread() {
-                            let thread_id = thread.id.clone();
-                            if let Err(err) = continue_thread_in_foreground(&thread_id) {
-                                app.error = Some(app::AppError::new(format!(
-                                    "Failed to run thread in foreground: {err}"
-                                )));
-                            } else {
-                                terminal.clear()?;
-                                refresh_all(&mut app).await;
-                            }
+                match resolve_thread_run_mode_action(&app, key.code) {
+                    Some(ThreadRunModeAction::Foreground { thread_id }) => {
+                        if let Err(err) = continue_thread_in_foreground(&thread_id) {
+                            app.error = Some(app::AppError::new(format!(
+                                "Failed to run thread in foreground: {err}"
+                            )));
+                        } else {
+                            terminal.clear()?;
+                            refresh_all(&mut app).await;
                         }
                     }
-                    KeyCode::Char('b') => {
-                        if let (Some(thread), Some(issue)) =
-                            (app.selected_thread(), app.selected_issue())
-                        {
-                            let thread_id = thread.id.clone();
-                            if let Err(err) = launch_background_thread_run(issue, &thread_id) {
-                                app.error = Some(app::AppError::new(format!(
-                                    "Failed to launch background run: {err}"
-                                )));
-                            }
+                    Some(ThreadRunModeAction::Background { thread_id, issue }) => {
+                        if let Err(err) = launch_background_thread_run(&issue, &thread_id) {
+                            app.error = Some(app::AppError::new(format!(
+                                "Failed to launch background run: {err}"
+                            )));
                         }
                     }
-                    _ => {}
+                    None => {}
                 }
             } else if app.awaiting_sort {
                 app.awaiting_sort = false;
@@ -513,6 +652,39 @@ async fn main() -> Result<()> {
                             keys::Action::Refresh => refresh_all(&mut app).await,
                             keys::Action::NewThread => open_workspace_picker(&mut app),
                             keys::Action::OpenIn => app.awaiting_open = true,
+                            keys::Action::OpenRunLog => {
+                                if let Some(action) =
+                                    resolve_run_management_action(&app, keys::Action::OpenRunLog)
+                                    && let Err(err) =
+                                        execute_run_management_action(&mut app, action).await
+                                {
+                                    app.error = Some(app::AppError::new(format!(
+                                        "Failed to open run log: {err}"
+                                    )));
+                                }
+                            }
+                            keys::Action::RetryRun => {
+                                if let Some(action) =
+                                    resolve_run_management_action(&app, keys::Action::RetryRun)
+                                    && let Err(err) =
+                                        execute_run_management_action(&mut app, action).await
+                                {
+                                    app.error = Some(app::AppError::new(format!(
+                                        "Failed to retry run: {err}"
+                                    )));
+                                }
+                            }
+                            keys::Action::MarkRunStale => {
+                                if let Some(action) =
+                                    resolve_run_management_action(&app, keys::Action::MarkRunStale)
+                                    && let Err(err) =
+                                        execute_run_management_action(&mut app, action).await
+                                {
+                                    app.error = Some(app::AppError::new(format!(
+                                        "Failed to mark run stale: {err}"
+                                    )));
+                                }
+                            }
                             keys::Action::Help => app.toggle_help(),
                             _ => {}
                         },
@@ -572,4 +744,152 @@ async fn main() -> Result<()> {
     disable_raw_mode()?;
     stdout().execute(LeaveAlternateScreen)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::amp::state::SessionRunStatus;
+    use crate::amp::thread::ThreadSummary;
+    use crate::api::fake::FakeLinearApi;
+    use crate::api::types::Issue;
+    use crate::app::DetailSection;
+
+    fn app_with_issue_and_thread() -> App<FakeLinearApi> {
+        let mut app = App::new(FakeLinearApi::new());
+        app.issues = vec![Issue {
+            id: "1".to_string(),
+            identifier: "JEM-1".to_string(),
+            title: "Test issue".to_string(),
+            url: None,
+            state: None,
+            priority: None,
+            project: None,
+            description: None,
+            assignee: None,
+            labels: None,
+            comments: None,
+        }];
+        app.detail_section = DetailSection::Threads;
+        app.detail_threads = vec![ThreadSummary {
+            id: "T-abc".to_string(),
+            title: "Test thread".to_string(),
+            message_count: 1,
+            last_activity_ms: 0,
+        }];
+        app.detail_session_runs = vec![app::SessionRunSummary {
+            run_id: "run-1".to_string(),
+            thread_id: "T-abc".to_string(),
+            status: SessionRunStatus::Failed,
+            log_path: Some("/tmp/run-1.log".to_string()),
+            created_at_ms: 100,
+        }];
+        app
+    }
+
+    #[test]
+    fn resolves_foreground_action_for_selected_thread() {
+        let app = app_with_issue_and_thread();
+
+        let action = resolve_thread_run_mode_action(&app, KeyCode::Char('f'));
+
+        match action {
+            Some(ThreadRunModeAction::Foreground { thread_id }) => {
+                assert_eq!(thread_id, "T-abc");
+            }
+            _ => panic!("expected foreground action"),
+        }
+    }
+
+    #[test]
+    fn resolves_background_action_for_selected_thread_and_issue() {
+        let app = app_with_issue_and_thread();
+
+        let action = resolve_thread_run_mode_action(&app, KeyCode::Char('b'));
+
+        match action {
+            Some(ThreadRunModeAction::Background { thread_id, issue }) => {
+                assert_eq!(thread_id, "T-abc");
+                assert_eq!(issue.identifier, "JEM-1");
+            }
+            _ => panic!("expected background action"),
+        }
+    }
+
+    #[test]
+    fn background_action_requires_selected_issue() {
+        let mut app = app_with_issue_and_thread();
+        app.issues.clear();
+
+        let action = resolve_thread_run_mode_action(&app, KeyCode::Char('b'));
+
+        assert!(action.is_none());
+    }
+
+    #[test]
+    fn foreground_action_requires_selected_thread() {
+        let mut app = app_with_issue_and_thread();
+        app.detail_threads.clear();
+
+        let action = resolve_thread_run_mode_action(&app, KeyCode::Char('f'));
+
+        assert!(action.is_none());
+    }
+
+    #[test]
+    fn non_run_mode_key_returns_no_action() {
+        let app = app_with_issue_and_thread();
+
+        let action = resolve_thread_run_mode_action(&app, KeyCode::Enter);
+
+        assert!(action.is_none());
+    }
+
+    #[test]
+    fn resolves_open_log_management_action() {
+        let app = app_with_issue_and_thread();
+
+        let action = resolve_run_management_action(&app, keys::Action::OpenRunLog);
+
+        match action {
+            Some(RunManagementAction::OpenLog { log_path }) => {
+                assert_eq!(log_path, "/tmp/run-1.log");
+            }
+            _ => panic!("expected open-log action"),
+        }
+    }
+
+    #[test]
+    fn open_log_management_action_requires_log_path() {
+        let mut app = app_with_issue_and_thread();
+        app.detail_session_runs[0].log_path = None;
+
+        let action = resolve_run_management_action(&app, keys::Action::OpenRunLog);
+
+        assert!(action.is_none());
+    }
+
+    #[test]
+    fn retry_management_action_requires_existing_run() {
+        let mut app = app_with_issue_and_thread();
+        app.detail_session_runs.clear();
+
+        let action = resolve_run_management_action(&app, keys::Action::RetryRun);
+
+        assert!(action.is_none());
+    }
+
+    #[test]
+    fn resolves_mark_stale_management_action() {
+        let app = app_with_issue_and_thread();
+
+        let action = resolve_run_management_action(&app, keys::Action::MarkRunStale);
+
+        match action {
+            Some(RunManagementAction::MarkStale { run_id }) => {
+                assert_eq!(run_id, "run-1");
+            }
+            _ => panic!("expected mark-stale action"),
+        }
+    }
 }

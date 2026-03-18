@@ -21,6 +21,18 @@ pub enum SessionRunStatus {
     Stale,
 }
 
+impl SessionRunStatus {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Stale => "stale",
+        }
+    }
+}
+
 impl Default for SessionRunStatus {
     fn default() -> Self {
         Self::Pending
@@ -160,6 +172,48 @@ impl State {
     /// Return all session runs keyed by run ID in deterministic key order.
     pub fn session_runs(&self) -> &BTreeMap<String, SessionRun> {
         &self.session_runs
+    }
+
+    /// Return session runs for a given issue identifier, sorted by creation time (newest first).
+    pub fn runs_for_issue(&self, issue_identifier: &str) -> Vec<(&str, &SessionRun)> {
+        let mut runs: Vec<(&str, &SessionRun)> = self
+            .session_runs
+            .iter()
+            .filter(|(_, run)| run.issue == issue_identifier)
+            .map(|(id, run)| (id.as_str(), run))
+            .collect();
+        runs.sort_by(|a, b| b.1.created_at_ms.cmp(&a.1.created_at_ms));
+        runs
+    }
+
+    /// Mark a persisted run as stale and clear process tracking metadata.
+    /// Returns true when the run existed and metadata changed.
+    pub fn mark_session_run_stale(&mut self, run_id: &str, now_ms: u64) -> bool {
+        let Some(run) = self.session_runs.get_mut(run_id) else {
+            return false;
+        };
+
+        let mut changed = false;
+
+        if run.status != SessionRunStatus::Stale {
+            run.status = SessionRunStatus::Stale;
+            changed = true;
+        }
+
+        if run.pid.take().is_some() {
+            changed = true;
+        }
+
+        if run.finished_at_ms.is_none() {
+            run.finished_at_ms = Some(now_ms);
+            changed = true;
+        }
+
+        if changed {
+            run.updated_at_ms = now_ms;
+        }
+
+        changed
     }
 }
 
@@ -437,6 +491,54 @@ workspace = "/ws"
     }
 
     #[test]
+    fn load_legacy_session_run_defaults_lifecycle_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.toml");
+        let toml = r#"
+[session_runs.run-legacy]
+thread_id = "T-legacy"
+issue = "JEM-104"
+workspace = "/legacy/ws"
+created_at_ms = 1710000000000
+updated_at_ms = 1710000000500
+"#;
+        std::fs::write(&path, toml).unwrap();
+
+        let state = State::load(&path).unwrap();
+        let run = state.session_run("run-legacy").unwrap();
+        assert_eq!(run.status, SessionRunStatus::Pending);
+        assert_eq!(run.pid, None);
+        assert_eq!(run.log_path, None);
+        assert_eq!(run.started_at_ms, None);
+        assert_eq!(run.finished_at_ms, None);
+    }
+
+    #[test]
+    fn migrated_legacy_session_run_round_trips_after_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.toml");
+        let toml = r#"
+[session_runs.run-legacy]
+thread_id = "T-legacy"
+issue = "JEM-104"
+workspace = "/legacy/ws"
+created_at_ms = 1710000000000
+updated_at_ms = 1710000000500
+"#;
+        std::fs::write(&path, toml).unwrap();
+
+        let state = State::load(&path).unwrap();
+        state.save(&path).unwrap();
+        let reloaded = State::load(&path).unwrap();
+
+        let run = reloaded.session_run("run-legacy").unwrap();
+        assert_eq!(run.status, SessionRunStatus::Pending);
+        assert_eq!(run.pid, None);
+        assert_eq!(run.started_at_ms, None);
+        assert_eq!(run.finished_at_ms, None);
+    }
+
+    #[test]
     fn session_run_round_trips_through_save_load() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("state.toml");
@@ -509,5 +611,133 @@ workspace = "/ws"
         let run_b_idx = toml_first.find("[session_runs.run-b]").unwrap();
         assert!(run_a_idx < run_b_idx);
         assert!(toml_first.contains("status = \"running\""));
+    }
+
+    #[test]
+    fn runs_for_issue_returns_matching_runs_newest_first() {
+        let mut state = State::default();
+        state.add_session_run(
+            "run-old",
+            SessionRun {
+                thread_id: "T-a".to_string(),
+                issue: "JEM-1".to_string(),
+                workspace: "/ws".to_string(),
+                pid: None,
+                status: SessionRunStatus::Completed,
+                log_path: None,
+                created_at_ms: 100,
+                updated_at_ms: 100,
+                started_at_ms: None,
+                finished_at_ms: None,
+            },
+        );
+        state.add_session_run(
+            "run-new",
+            SessionRun {
+                thread_id: "T-b".to_string(),
+                issue: "JEM-1".to_string(),
+                workspace: "/ws".to_string(),
+                pid: None,
+                status: SessionRunStatus::Running,
+                log_path: None,
+                created_at_ms: 200,
+                updated_at_ms: 200,
+                started_at_ms: None,
+                finished_at_ms: None,
+            },
+        );
+        state.add_session_run(
+            "run-other",
+            SessionRun {
+                thread_id: "T-c".to_string(),
+                issue: "JEM-2".to_string(),
+                workspace: "/ws".to_string(),
+                pid: None,
+                status: SessionRunStatus::Pending,
+                log_path: None,
+                created_at_ms: 150,
+                updated_at_ms: 150,
+                started_at_ms: None,
+                finished_at_ms: None,
+            },
+        );
+
+        let runs = state.runs_for_issue("JEM-1");
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].0, "run-new");
+        assert_eq!(runs[1].0, "run-old");
+    }
+
+    #[test]
+    fn runs_for_issue_returns_empty_for_unknown() {
+        let state = State::default();
+        assert!(state.runs_for_issue("JEM-999").is_empty());
+    }
+
+    #[test]
+    fn mark_session_run_stale_updates_run_metadata() {
+        let mut state = State::default();
+        state.add_session_run(
+            "run-1",
+            SessionRun {
+                thread_id: "T-a".to_string(),
+                issue: "JEM-1".to_string(),
+                workspace: "/ws".to_string(),
+                pid: Some(1234),
+                status: SessionRunStatus::Running,
+                log_path: Some("/tmp/run-1.log".to_string()),
+                created_at_ms: 10,
+                updated_at_ms: 11,
+                started_at_ms: Some(12),
+                finished_at_ms: None,
+            },
+        );
+
+        assert!(state.mark_session_run_stale("run-1", 99));
+        let run = state.session_run("run-1").unwrap();
+        assert_eq!(run.status, SessionRunStatus::Stale);
+        assert_eq!(run.pid, None);
+        assert_eq!(run.finished_at_ms, Some(99));
+        assert_eq!(run.updated_at_ms, 99);
+    }
+
+    #[test]
+    fn mark_session_run_stale_is_noop_for_unknown_run() {
+        let mut state = State::default();
+        assert!(!state.mark_session_run_stale("run-missing", 42));
+    }
+
+    #[test]
+    fn mark_session_run_stale_keeps_existing_finish_time() {
+        let mut state = State::default();
+        state.add_session_run(
+            "run-1",
+            SessionRun {
+                thread_id: "T-a".to_string(),
+                issue: "JEM-1".to_string(),
+                workspace: "/ws".to_string(),
+                pid: None,
+                status: SessionRunStatus::Stale,
+                log_path: Some("/tmp/run-1.log".to_string()),
+                created_at_ms: 10,
+                updated_at_ms: 50,
+                started_at_ms: Some(12),
+                finished_at_ms: Some(40),
+            },
+        );
+
+        assert!(!state.mark_session_run_stale("run-1", 99));
+        let run = state.session_run("run-1").unwrap();
+        assert_eq!(run.finished_at_ms, Some(40));
+        assert_eq!(run.updated_at_ms, 50);
+    }
+
+    #[test]
+    fn session_run_status_label() {
+        assert_eq!(SessionRunStatus::Pending.label(), "pending");
+        assert_eq!(SessionRunStatus::Running.label(), "running");
+        assert_eq!(SessionRunStatus::Completed.label(), "completed");
+        assert_eq!(SessionRunStatus::Failed.label(), "failed");
+        assert_eq!(SessionRunStatus::Stale.label(), "stale");
     }
 }
