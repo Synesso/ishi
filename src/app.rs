@@ -60,6 +60,8 @@ pub struct App<A: LinearApi> {
     pub awaiting_filter: bool,
     pub awaiting_sort: bool,
     pub sort: Option<(SortColumn, SortDirection)>,
+    pub detail_scroll: u16,
+    pub detail_scroll_max: u16,
 }
 
 impl<A: LinearApi> App<A> {
@@ -78,6 +80,8 @@ impl<A: LinearApi> App<A> {
             awaiting_filter: false,
             awaiting_sort: false,
             sort: None,
+            detail_scroll: 0,
+            detail_scroll_max: 0,
         }
     }
 
@@ -183,6 +187,34 @@ impl<A: LinearApi> App<A> {
         self.filter_input.clear();
         self.selected = 0;
     }
+
+    pub fn select_issue(&mut self) {
+        let issues = self.filtered_issues();
+        if self.selected < issues.len() {
+            self.view = View::Detail;
+            self.detail_scroll = 0;
+        }
+    }
+
+    pub fn back_to_list(&mut self) {
+        self.view = View::MyIssues;
+        self.detail_scroll = 0;
+    }
+
+    pub fn selected_issue(&self) -> Option<&Issue> {
+        let issues = self.filtered_issues();
+        issues.get(self.selected).copied()
+    }
+
+    pub fn scroll_detail_down(&mut self) {
+        if self.detail_scroll < self.detail_scroll_max {
+            self.detail_scroll = self.detail_scroll.saturating_add(1);
+        }
+    }
+
+    pub fn scroll_detail_up(&mut self) {
+        self.detail_scroll = self.detail_scroll.saturating_sub(1);
+    }
 }
 
 #[cfg(test)]
@@ -200,6 +232,10 @@ mod tests {
                 state: None,
                 priority: Some(2.0),
                 project: None,
+                description: None,
+                assignee: None,
+                labels: None,
+                comments: None,
             },
             Issue {
                 id: "2".into(),
@@ -208,6 +244,10 @@ mod tests {
                 state: None,
                 priority: Some(3.0),
                 project: None,
+                description: None,
+                assignee: None,
+                labels: None,
+                comments: None,
             },
             Issue {
                 id: "3".into(),
@@ -216,6 +256,10 @@ mod tests {
                 state: None,
                 priority: None,
                 project: None,
+                description: None,
+                assignee: None,
+                labels: None,
+                comments: None,
             },
         ];
         app
@@ -292,5 +336,67 @@ mod tests {
         app.cancel_filter();
         assert!(!app.filtering);
         assert!(app.filter_input.is_empty());
+    }
+
+    #[test]
+    fn select_issue_enters_detail_view() {
+        let mut app = app_with_issues();
+        app.selected = 1;
+        app.select_issue();
+        assert!(matches!(app.view, View::Detail));
+        assert_eq!(app.detail_scroll, 0);
+    }
+
+    #[test]
+    fn back_to_list_returns_to_my_issues() {
+        let mut app = app_with_issues();
+        app.select_issue();
+        app.back_to_list();
+        assert!(matches!(app.view, View::MyIssues));
+    }
+
+    #[test]
+    fn selected_issue_returns_correct_issue() {
+        let mut app = app_with_issues();
+        app.selected = 1;
+        let issue = app.selected_issue().unwrap();
+        assert_eq!(issue.identifier, "JEM-2");
+    }
+
+    #[test]
+    fn detail_scroll_up_down() {
+        let mut app = app_with_issues();
+        app.select_issue();
+        app.detail_scroll_max = 5;
+        assert_eq!(app.detail_scroll, 0);
+        app.scroll_detail_down();
+        app.scroll_detail_down();
+        assert_eq!(app.detail_scroll, 2);
+        app.scroll_detail_up();
+        assert_eq!(app.detail_scroll, 1);
+        app.scroll_detail_up();
+        app.scroll_detail_up(); // should not underflow
+        assert_eq!(app.detail_scroll, 0);
+    }
+
+    #[test]
+    fn detail_scroll_clamped_to_max() {
+        let mut app = app_with_issues();
+        app.select_issue();
+        app.detail_scroll_max = 2;
+        app.scroll_detail_down();
+        app.scroll_detail_down();
+        assert_eq!(app.detail_scroll, 2);
+        app.scroll_detail_down(); // should not exceed max
+        assert_eq!(app.detail_scroll, 2);
+    }
+
+    #[test]
+    fn detail_scroll_blocked_when_content_fits() {
+        let mut app = app_with_issues();
+        app.select_issue();
+        app.detail_scroll_max = 0; // content fits in box
+        app.scroll_detail_down();
+        assert_eq!(app.detail_scroll, 0);
     }
 }

@@ -38,6 +38,7 @@ async fn main() -> Result<()> {
             let area = frame.area();
             match app.view {
                 app::View::MyIssues => views::my_issues::render(frame, area, &app),
+                app::View::Detail => views::detail::render(frame, area, &mut app),
                 _ => {
                     frame.render_widget(
                         ratatui::widgets::Paragraph::new("ishi — (view not implemented)"),
@@ -88,6 +89,17 @@ async fn main() -> Result<()> {
                     }
                     _ => {}
                 }
+            } else if matches!(app.view, app::View::Detail) {
+                if let Some(action) = keys::map_key(key) {
+                    match action {
+                        keys::Action::Quit => app.awaiting_quit = true,
+                        keys::Action::Back => app.back_to_list(),
+                        keys::Action::MoveDown => app.scroll_detail_down(),
+                        keys::Action::MoveUp => app.scroll_detail_up(),
+                        keys::Action::Top => app.detail_scroll = 0,
+                        _ => {}
+                    }
+                }
             } else if let Some(action) = keys::map_key(key) {
                 match action {
                     keys::Action::Quit => app.awaiting_quit = true,
@@ -95,6 +107,7 @@ async fn main() -> Result<()> {
                     keys::Action::MoveUp => app.move_up(),
                     keys::Action::Top => app.top(),
                     keys::Action::Bottom => app.bottom(),
+                    keys::Action::Select => app.select_issue(),
                     keys::Action::Search => app.start_filter(),
                     keys::Action::Back => app.clear_filter(),
                     keys::Action::OrderBy => app.awaiting_sort = true,
