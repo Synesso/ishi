@@ -8,19 +8,27 @@ use super::types::Issue;
 
 /// A fake Linear API client for tests and offline development.
 /// Enqueue responses with `push_response`, and they'll be returned in order by `query`.
+/// PR URL responses are enqueued separately with `push_pr_url`.
 pub struct FakeLinearApi {
     responses: Mutex<VecDeque<Value>>,
+    pr_urls: Mutex<VecDeque<Option<String>>>,
 }
 
 impl FakeLinearApi {
     pub fn new() -> Self {
         Self {
             responses: Mutex::new(VecDeque::new()),
+            pr_urls: Mutex::new(VecDeque::new()),
         }
     }
 
     pub fn push_response(&self, response: Value) {
         self.responses.lock().unwrap().push_back(response);
+    }
+
+    #[allow(dead_code)]
+    pub fn push_pr_url(&self, url: Option<String>) {
+        self.pr_urls.lock().unwrap().push_back(url);
     }
 }
 
@@ -43,6 +51,10 @@ impl LinearApi for FakeLinearApi {
         }
         let issues: Vec<Issue> = serde_json::from_value(nodes.clone())?;
         Ok(issues)
+    }
+
+    async fn fetch_pull_request_url(&self, _issue_id: &str) -> Result<Option<String>> {
+        Ok(self.pr_urls.lock().unwrap().pop_front().flatten())
     }
 }
 
@@ -88,5 +100,30 @@ mod tests {
         let fake = FakeLinearApi::new();
         let issues = fake.fetch_my_issues().await.unwrap();
         assert!(issues.is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetch_pull_request_url_returns_enqueued_url() {
+        let fake = FakeLinearApi::new();
+        fake.push_pr_url(Some("https://github.com/org/repo/pull/42".into()));
+
+        let url = fake.fetch_pull_request_url("issue-1").await.unwrap();
+        assert_eq!(url, Some("https://github.com/org/repo/pull/42".into()));
+    }
+
+    #[tokio::test]
+    async fn fetch_pull_request_url_returns_none_when_empty() {
+        let fake = FakeLinearApi::new();
+        let url = fake.fetch_pull_request_url("issue-1").await.unwrap();
+        assert!(url.is_none());
+    }
+
+    #[tokio::test]
+    async fn fetch_pull_request_url_returns_none_explicitly() {
+        let fake = FakeLinearApi::new();
+        fake.push_pr_url(None);
+
+        let url = fake.fetch_pull_request_url("issue-1").await.unwrap();
+        assert!(url.is_none());
     }
 }

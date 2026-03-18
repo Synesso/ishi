@@ -6,6 +6,19 @@ use super::types::Issue;
 
 const LINEAR_API_URL: &str = "https://api.linear.app/graphql";
 
+const ISSUE_PR_QUERY: &str = r#"
+query($issueId: String!) {
+  issue(id: $issueId) {
+    attachments {
+      nodes {
+        url
+        sourceType
+      }
+    }
+  }
+}
+"#;
+
 const MY_ISSUES_QUERY: &str = r#"
 query {
   viewer {
@@ -42,6 +55,11 @@ pub trait LinearApi: Send + Sync {
     fn fetch_my_issues(
         &self,
     ) -> impl std::future::Future<Output = Result<Vec<Issue>>> + Send;
+
+    fn fetch_pull_request_url(
+        &self,
+        issue_id: &str,
+    ) -> impl std::future::Future<Output = Result<Option<String>>> + Send;
 }
 
 pub struct LinearClient {
@@ -85,5 +103,21 @@ impl LinearApi for LinearClient {
             resp["data"]["viewer"]["assignedIssues"]["nodes"].clone(),
         )?;
         Ok(issues)
+    }
+
+    async fn fetch_pull_request_url(&self, issue_id: &str) -> Result<Option<String>> {
+        let vars = serde_json::json!({ "issueId": issue_id });
+        let resp = self.query(ISSUE_PR_QUERY, Some(vars)).await?;
+        let nodes = &resp["data"]["issue"]["attachments"]["nodes"];
+        if let Some(arr) = nodes.as_array() {
+            for node in arr {
+                if let Some(url) = node["url"].as_str()
+                    && url.contains("github.com") && url.contains("/pull/")
+                {
+                    return Ok(Some(url.to_string()));
+                }
+            }
+        }
+        Ok(None)
     }
 }

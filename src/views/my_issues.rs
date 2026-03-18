@@ -119,7 +119,9 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         let line = Line::from(vec![
             Span::raw("open in: "),
             Span::styled("l", key_style),
-            Span::raw("inear"),
+            Span::raw("inear  "),
+            Span::styled("g", key_style),
+            Span::raw("ithub PR"),
         ]);
         frame.render_widget(Paragraph::new(line), chunks[1]);
     } else if app.awaiting_sort {

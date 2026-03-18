@@ -225,7 +225,9 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
         Line::from(vec![
             Span::raw("open in: "),
             Span::styled("l", key_style),
-            Span::raw("inear"),
+            Span::raw("inear  "),
+            Span::styled("g", key_style),
+            Span::raw("ithub PR"),
         ])
     } else if app.detail_section == DetailSection::Threads {
         Line::from(vec![

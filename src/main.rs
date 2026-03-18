@@ -223,12 +223,25 @@ async fn main() -> Result<()> {
                 }
             } else if app.awaiting_open {
                 app.awaiting_open = false;
-                if let KeyCode::Char('l') = key.code
-                    && let Some(url) = app.selected_issue_url()
-                {
-                    let _ = std::process::Command::new("open")
-                        .arg(&url)
-                        .spawn();
+                match key.code {
+                    KeyCode::Char('l') => {
+                        if let Some(url) = app.selected_issue_url() {
+                            let _ = std::process::Command::new("open")
+                                .arg(&url)
+                                .spawn();
+                        }
+                    }
+                    KeyCode::Char('g') => {
+                        if let Some(issue) = app.selected_issue() {
+                            let issue_id = issue.id.clone();
+                            if let Ok(Some(url)) = app.api.fetch_pull_request_url(&issue_id).await {
+                                let _ = std::process::Command::new("open")
+                                    .arg(&url)
+                                    .spawn();
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             } else if app.awaiting_sort {
                 app.awaiting_sort = false;
