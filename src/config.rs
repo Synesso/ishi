@@ -17,10 +17,10 @@ pub fn config_path() -> Result<PathBuf> {
 
 pub fn resolve_api_key() -> Result<String> {
     // 1. Environment variable
-    if let Ok(key) = std::env::var("LINEAR_API_KEY") {
-        if !key.is_empty() {
-            return Ok(key);
-        }
+    if let Ok(key) = std::env::var("LINEAR_API_KEY")
+        && !key.is_empty()
+    {
+        return Ok(key);
     }
 
     // 2. Config file
@@ -28,10 +28,10 @@ pub fn resolve_api_key() -> Result<String> {
     if path.exists() {
         let contents = std::fs::read_to_string(&path)?;
         let cfg: Config = toml::from_str(&contents)?;
-        if let Some(key) = cfg.api_key {
-            if !key.is_empty() {
-                return Ok(key);
-            }
+        if let Some(key) = cfg.api_key
+            && !key.is_empty()
+        {
+            return Ok(key);
         }
     }
 
@@ -42,6 +42,7 @@ pub fn resolve_api_key() -> Result<String> {
     )
 }
 
+#[allow(dead_code)]
 pub fn store_api_key(key: &str) -> Result<()> {
     let cfg = Config {
         api_key: Some(key.to_string()),

@@ -2,7 +2,29 @@ use anyhow::Result;
 use reqwest::Client;
 use serde_json::Value;
 
+use super::types::Issue;
+
 const LINEAR_API_URL: &str = "https://api.linear.app/graphql";
+
+const MY_ISSUES_QUERY: &str = r#"
+query {
+  viewer {
+    assignedIssues(
+      first: 50
+      filter: { state: { type: { nin: ["completed", "canceled"] } } }
+      orderBy: updatedAt
+    ) {
+      nodes {
+        id
+        identifier
+        title
+        state { name }
+        priority
+      }
+    }
+  }
+}
+"#;
 
 pub trait LinearApi: Send + Sync {
     fn query(
@@ -10,6 +32,10 @@ pub trait LinearApi: Send + Sync {
         query: &str,
         variables: Option<Value>,
     ) -> impl std::future::Future<Output = Result<Value>> + Send;
+
+    fn fetch_my_issues(
+        &self,
+    ) -> impl std::future::Future<Output = Result<Vec<Issue>>> + Send;
 }
 
 pub struct LinearClient {
@@ -45,5 +71,13 @@ impl LinearApi for LinearClient {
             .await?;
 
         Ok(resp)
+    }
+
+    async fn fetch_my_issues(&self) -> Result<Vec<Issue>> {
+        let resp = self.query(MY_ISSUES_QUERY, None).await?;
+        let issues: Vec<Issue> = serde_json::from_value(
+            resp["data"]["viewer"]["assignedIssues"]["nodes"].clone(),
+        )?;
+        Ok(issues)
     }
 }

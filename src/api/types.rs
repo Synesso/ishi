@@ -2,6 +2,7 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Issue {
+    #[allow(dead_code)]
     pub id: String,
     pub identifier: String,
     pub title: String,
@@ -9,9 +10,43 @@ pub struct Issue {
     pub priority: Option<f64>,
 }
 
+impl Issue {
+    pub fn status_str(&self) -> &str {
+        self.state.as_ref().map_or("—", |s| s.name.as_str())
+    }
+
+    pub fn priority_str(&self) -> &str {
+        match self.priority.map(|p| p as u8) {
+            Some(1) => "Urgent",
+            Some(2) => "High",
+            Some(3) => "Medium",
+            Some(4) => "Low",
+            _ => "—",
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct IssueState {
     pub name: String,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub struct IssueConnection {
+    pub nodes: Vec<Issue>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub struct IssuesData {
+    pub issues: IssueConnection,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub struct ViewerIssuesResponse {
+    pub data: IssuesData,
 }
 
 #[cfg(test)]
