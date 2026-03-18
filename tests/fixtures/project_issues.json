@@ -1,0 +1,36 @@
+{
+  "data": {
+    "project": {
+      "issues": {
+        "nodes": [
+          {
+            "id": "issue-10",
+            "identifier": "JEM-10",
+            "title": "Project issue one",
+            "url": "https://linear.app/test/issue/JEM-10",
+            "state": { "name": "In Progress" },
+            "priority": 2.0,
+            "project": { "name": "Alpha Project" },
+            "description": "First project issue.",
+            "assignee": { "name": "Alice" },
+            "labels": { "nodes": [] },
+            "comments": { "nodes": [] }
+          },
+          {
+            "id": "issue-11",
+            "identifier": "JEM-11",
+            "title": "Project issue two",
+            "url": "https://linear.app/test/issue/JEM-11",
+            "state": { "name": "Todo" },
+            "priority": 3.0,
+            "project": { "name": "Alpha Project" },
+            "description": null,
+            "assignee": null,
+            "labels": { "nodes": [] },
+            "comments": { "nodes": [] }
+          }
+        ]
+      }
+    }
+  }
+}

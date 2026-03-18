@@ -16,6 +16,7 @@ pub enum Action {
     Tab,
     NewThread,
     OpenIn,
+    Projects,
 }
 
 pub fn map_key(key: KeyEvent) -> Option<Action> {
@@ -36,6 +37,7 @@ pub fn map_key(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Tab) => Some(Action::Tab),
         (_, KeyCode::Char('a')) => Some(Action::NewThread),
         (_, KeyCode::Char('o')) => Some(Action::OpenIn),
+        (_, KeyCode::Char('p')) => Some(Action::Projects),
         _ => None,
     }
 }
@@ -115,6 +117,11 @@ mod tests {
     #[test]
     fn open_in_on_o() {
         assert!(matches!(map_key(key(KeyCode::Char('o'))), Some(Action::OpenIn)));
+    }
+
+    #[test]
+    fn projects_on_p() {
+        assert!(matches!(map_key(key(KeyCode::Char('p'))), Some(Action::Projects)));
     }
 
     #[test]

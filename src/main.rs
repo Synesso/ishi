@@ -127,12 +127,8 @@ async fn main() -> Result<()> {
             match app.view {
                 app::View::MyIssues => views::my_issues::render(frame, area, &app),
                 app::View::Detail => views::detail::render(frame, area, &mut app),
-                _ => {
-                    frame.render_widget(
-                        ratatui::widgets::Paragraph::new("ishi — (view not implemented)"),
-                        area,
-                    );
-                }
+                app::View::ProjectList => views::project_list::render(frame, area, &app),
+                app::View::ProjectDetail => views::project::render(frame, area, &app),
             }
             if app.show_help {
                 views::help::render(frame, area);
@@ -292,6 +288,47 @@ async fn main() -> Result<()> {
                     }
                     _ => {}
                 }
+            } else if matches!(app.view, app::View::ProjectList) {
+                if let Some(action) = keys::map_key(key) {
+                    match action {
+                        keys::Action::Quit => app.awaiting_quit = true,
+                        keys::Action::MoveDown => app.project_move_down(),
+                        keys::Action::MoveUp => app.project_move_up(),
+                        keys::Action::Top => app.project_top(),
+                        keys::Action::Bottom => app.project_bottom(),
+                        keys::Action::Select => {
+                            app.select_project();
+                            app.load_project_issues().await;
+                        }
+                        keys::Action::Back => app.switch_to_my_issues(),
+                        keys::Action::Refresh => app.refresh_projects().await,
+                        keys::Action::Help => app.toggle_help(),
+                        keys::Action::OpenIn => {
+                            if let Some(url) = app.selected_project_url() {
+                                let _ = std::process::Command::new("open")
+                                    .arg(&url)
+                                    .spawn();
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            } else if matches!(app.view, app::View::ProjectDetail) {
+                if let Some(action) = keys::map_key(key) {
+                    match action {
+                        keys::Action::Quit => app.awaiting_quit = true,
+                        keys::Action::MoveDown => app.project_issue_move_down(),
+                        keys::Action::MoveUp => app.project_issue_move_up(),
+                        keys::Action::Top => app.project_issue_top(),
+                        keys::Action::Bottom => app.project_issue_bottom(),
+                        keys::Action::Back => app.back_from_project_detail(),
+                        keys::Action::Refresh => {
+                            app.load_project_issues().await;
+                        }
+                        keys::Action::Help => app.toggle_help(),
+                        _ => {}
+                    }
+                }
             } else if matches!(app.view, app::View::Detail) {
                 if let Some(action) = keys::map_key(key) {
                     match app.detail_section {
@@ -355,6 +392,10 @@ async fn main() -> Result<()> {
                     keys::Action::Refresh => app.refresh().await,
                     keys::Action::OpenIn => app.awaiting_open = true,
                     keys::Action::Help => app.toggle_help(),
+                    keys::Action::Projects => {
+                        app.switch_to_projects();
+                        app.load_projects().await;
+                    }
                     _ => {}
                 }
             }

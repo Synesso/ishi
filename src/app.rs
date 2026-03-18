@@ -4,10 +4,11 @@ use std::time::Duration;
 use crate::amp::thread::ThreadSummary;
 use crate::api::cache::ResponseCache;
 use crate::api::client::LinearApi;
-use crate::api::types::Issue;
+use crate::api::types::{Issue, Project};
 
 const CACHE_TTL_SECS: u64 = 300; // 5 minutes
 const CACHE_KEY_MY_ISSUES: &str = "my_issues";
+const CACHE_KEY_PROJECTS: &str = "projects";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DetailSection {
@@ -15,10 +16,10 @@ pub enum DetailSection {
     Threads,
 }
 
-#[allow(dead_code)]
 pub enum View {
     MyIssues,
-    Project,
+    ProjectList,
+    ProjectDetail,
     Detail,
 }
 
@@ -146,6 +147,11 @@ pub struct App<A: LinearApi> {
     pub workspace_picker: Option<WorkspacePicker>,
     pub show_help: bool,
     pub cache: ResponseCache<Vec<Issue>>,
+    pub projects: Vec<Project>,
+    pub project_selected: usize,
+    pub project_cache: ResponseCache<Vec<Project>>,
+    pub project_issues: Vec<Issue>,
+    pub project_issue_selected: usize,
 }
 
 impl<A: LinearApi> App<A> {
@@ -177,6 +183,11 @@ impl<A: LinearApi> App<A> {
             workspace_picker: None,
             show_help: false,
             cache: ResponseCache::new(Duration::from_secs(CACHE_TTL_SECS)),
+            projects: Vec::new(),
+            project_selected: 0,
+            project_cache: ResponseCache::new(Duration::from_secs(CACHE_TTL_SECS)),
+            project_issues: Vec::new(),
+            project_issue_selected: 0,
         }
     }
 
@@ -390,6 +401,120 @@ impl<A: LinearApi> App<A> {
 
     pub fn selected_issue_url(&self) -> Option<String> {
         self.selected_issue().and_then(|i| i.url.clone())
+    }
+
+    pub fn switch_to_projects(&mut self) {
+        self.view = View::ProjectList;
+    }
+
+    pub fn switch_to_my_issues(&mut self) {
+        self.view = View::MyIssues;
+    }
+
+    pub fn project_move_down(&mut self) {
+        let len = self.projects.len();
+        if len > 0 && self.project_selected < len - 1 {
+            self.project_selected += 1;
+        }
+    }
+
+    pub fn project_move_up(&mut self) {
+        if self.project_selected > 0 {
+            self.project_selected -= 1;
+        }
+    }
+
+    pub fn project_top(&mut self) {
+        self.project_selected = 0;
+    }
+
+    pub fn project_bottom(&mut self) {
+        let len = self.projects.len();
+        if len > 0 {
+            self.project_selected = len - 1;
+        }
+    }
+
+    pub fn selected_project(&self) -> Option<&Project> {
+        self.projects.get(self.project_selected)
+    }
+
+    pub fn select_project(&mut self) {
+        if self.project_selected < self.projects.len() {
+            self.view = View::ProjectDetail;
+            self.project_issue_selected = 0;
+        }
+    }
+
+    pub fn back_from_project_detail(&mut self) {
+        self.view = View::ProjectList;
+        self.project_issues.clear();
+        self.project_issue_selected = 0;
+    }
+
+    pub fn project_issue_move_down(&mut self) {
+        let len = self.project_issues.len();
+        if len > 0 && self.project_issue_selected < len - 1 {
+            self.project_issue_selected += 1;
+        }
+    }
+
+    pub fn project_issue_move_up(&mut self) {
+        if self.project_issue_selected > 0 {
+            self.project_issue_selected -= 1;
+        }
+    }
+
+    pub fn project_issue_top(&mut self) {
+        self.project_issue_selected = 0;
+    }
+
+    pub fn project_issue_bottom(&mut self) {
+        let len = self.project_issues.len();
+        if len > 0 {
+            self.project_issue_selected = len - 1;
+        }
+    }
+
+    pub fn selected_project_issue(&self) -> Option<&Issue> {
+        self.project_issues.get(self.project_issue_selected)
+    }
+
+    pub fn selected_project_url(&self) -> Option<String> {
+        self.selected_project().and_then(|p| p.url.clone())
+    }
+
+    /// Load projects, serving from cache if fresh, otherwise fetching from API.
+    pub async fn load_projects(&mut self) {
+        if let Some(cached) = self.project_cache.get(CACHE_KEY_PROJECTS) {
+            self.projects = cached.clone();
+            return;
+        }
+        self.fetch_and_cache_projects().await;
+    }
+
+    async fn fetch_and_cache_projects(&mut self) {
+        if let Ok(projects) = self.api.fetch_projects().await {
+            self.project_cache.insert(CACHE_KEY_PROJECTS, projects.clone());
+            self.projects = projects;
+        }
+    }
+
+    pub async fn load_project_issues(&mut self) {
+        if let Some(project) = self.selected_project() {
+            let project_id = project.id.clone();
+            if let Ok(issues) = self.api.fetch_project_issues(&project_id).await {
+                self.project_issues = issues;
+                self.project_issue_selected = 0;
+            }
+        }
+    }
+
+    pub async fn refresh_projects(&mut self) {
+        self.refreshing = true;
+        self.project_cache.invalidate(CACHE_KEY_PROJECTS);
+        self.fetch_and_cache_projects().await;
+        self.refreshing = false;
     }
 
     /// Load issues, serving from cache if fresh, otherwise fetching from API.
@@ -958,6 +1083,273 @@ mod tests {
 
         app.cancel_workspace_picker();
         assert!(app.workspace_picker.is_none());
+    }
+
+    fn app_with_projects() -> App<FakeLinearApi> {
+        let mut app = App::new(FakeLinearApi::new());
+        app.projects = vec![
+            Project {
+                id: "p1".into(),
+                name: "Alpha Project".into(),
+                state: Some("started".into()),
+                progress: Some(0.5),
+                lead: Some(crate::api::types::IssueUser { name: "Alice".into() }),
+                url: Some("https://linear.app/test/project/alpha".into()),
+            },
+            Project {
+                id: "p2".into(),
+                name: "Beta Project".into(),
+                state: Some("planned".into()),
+                progress: Some(0.0),
+                lead: None,
+                url: None,
+            },
+            Project {
+                id: "p3".into(),
+                name: "Gamma Project".into(),
+                state: None,
+                progress: None,
+                lead: None,
+                url: Some("https://linear.app/test/project/gamma".into()),
+            },
+        ];
+        app
+    }
+
+    #[test]
+    fn switch_to_projects_changes_view() {
+        let mut app = app_with_issues();
+        assert!(matches!(app.view, View::MyIssues));
+        app.switch_to_projects();
+        assert!(matches!(app.view, View::ProjectList));
+    }
+
+    #[test]
+    fn switch_to_my_issues_changes_view() {
+        let mut app = app_with_issues();
+        app.switch_to_projects();
+        app.switch_to_my_issues();
+        assert!(matches!(app.view, View::MyIssues));
+    }
+
+    #[test]
+    fn project_navigation_wraps_at_bounds() {
+        let mut app = app_with_projects();
+        assert_eq!(app.project_selected, 0);
+
+        app.project_move_down();
+        assert_eq!(app.project_selected, 1);
+        app.project_move_down();
+        assert_eq!(app.project_selected, 2);
+        app.project_move_down(); // at bottom, stays
+        assert_eq!(app.project_selected, 2);
+
+        app.project_move_up();
+        assert_eq!(app.project_selected, 1);
+        app.project_top();
+        assert_eq!(app.project_selected, 0);
+        app.project_move_up(); // at top, stays
+        assert_eq!(app.project_selected, 0);
+    }
+
+    #[test]
+    fn project_bottom_goes_to_last() {
+        let mut app = app_with_projects();
+        app.project_bottom();
+        assert_eq!(app.project_selected, 2);
+    }
+
+    #[test]
+    fn project_top_goes_to_first() {
+        let mut app = app_with_projects();
+        app.project_selected = 2;
+        app.project_top();
+        assert_eq!(app.project_selected, 0);
+    }
+
+    #[test]
+    fn selected_project_returns_correct_project() {
+        let mut app = app_with_projects();
+        app.project_selected = 1;
+        let project = app.selected_project().unwrap();
+        assert_eq!(project.name, "Beta Project");
+    }
+
+    #[test]
+    fn selected_project_returns_none_when_empty() {
+        let app = App::new(FakeLinearApi::new());
+        assert!(app.selected_project().is_none());
+    }
+
+    #[test]
+    fn select_project_enters_project_detail_view() {
+        let mut app = app_with_projects();
+        app.project_selected = 0;
+        app.select_project();
+        assert!(matches!(app.view, View::ProjectDetail));
+        assert_eq!(app.project_issue_selected, 0);
+    }
+
+    #[test]
+    fn select_project_on_empty_does_nothing() {
+        let mut app = App::new(FakeLinearApi::new());
+        app.view = View::ProjectList;
+        app.select_project();
+        assert!(matches!(app.view, View::ProjectList));
+    }
+
+    #[test]
+    fn back_from_project_detail_returns_to_project_list() {
+        let mut app = app_with_projects();
+        app.select_project();
+        app.project_issues = vec![Issue {
+            id: "1".into(),
+            identifier: "JEM-1".into(),
+            title: "Test".into(),
+            url: None,
+            state: None,
+            priority: None,
+            project: None,
+            description: None,
+            assignee: None,
+            labels: None,
+            comments: None,
+        }];
+        app.back_from_project_detail();
+        assert!(matches!(app.view, View::ProjectList));
+        assert!(app.project_issues.is_empty());
+        assert_eq!(app.project_issue_selected, 0);
+    }
+
+    #[test]
+    fn project_issue_navigation() {
+        let mut app = app_with_projects();
+        app.project_issues = vec![
+            Issue { id: "1".into(), identifier: "JEM-1".into(), title: "A".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
+            Issue { id: "2".into(), identifier: "JEM-2".into(), title: "B".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
+        ];
+        assert_eq!(app.project_issue_selected, 0);
+        app.project_issue_move_down();
+        assert_eq!(app.project_issue_selected, 1);
+        app.project_issue_move_down(); // at end
+        assert_eq!(app.project_issue_selected, 1);
+        app.project_issue_move_up();
+        assert_eq!(app.project_issue_selected, 0);
+        app.project_issue_move_up(); // at start
+        assert_eq!(app.project_issue_selected, 0);
+    }
+
+    #[test]
+    fn project_issue_top_and_bottom() {
+        let mut app = app_with_projects();
+        app.project_issues = vec![
+            Issue { id: "1".into(), identifier: "JEM-1".into(), title: "A".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
+            Issue { id: "2".into(), identifier: "JEM-2".into(), title: "B".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
+            Issue { id: "3".into(), identifier: "JEM-3".into(), title: "C".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
+        ];
+        app.project_issue_bottom();
+        assert_eq!(app.project_issue_selected, 2);
+        app.project_issue_top();
+        assert_eq!(app.project_issue_selected, 0);
+    }
+
+    #[test]
+    fn selected_project_issue_returns_correct_issue() {
+        let mut app = app_with_projects();
+        app.project_issues = vec![
+            Issue { id: "1".into(), identifier: "JEM-1".into(), title: "A".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
+            Issue { id: "2".into(), identifier: "JEM-2".into(), title: "B".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
+        ];
+        app.project_issue_selected = 1;
+        let issue = app.selected_project_issue().unwrap();
+        assert_eq!(issue.identifier, "JEM-2");
+    }
+
+    #[test]
+    fn selected_project_url_returns_url() {
+        let app = app_with_projects();
+        assert_eq!(
+            app.selected_project_url(),
+            Some("https://linear.app/test/project/alpha".into())
+        );
+    }
+
+    #[test]
+    fn selected_project_url_returns_none_when_no_url() {
+        let mut app = app_with_projects();
+        app.project_selected = 1;
+        assert!(app.selected_project_url().is_none());
+    }
+
+    #[tokio::test]
+    async fn load_projects_fetches_on_empty_cache() {
+        let fake = FakeLinearApi::new();
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/projects.json")).unwrap();
+        fake.push_response(fixture);
+        let mut app = App::new(fake);
+
+        assert!(app.projects.is_empty());
+        app.load_projects().await;
+        assert_eq!(app.projects.len(), 2);
+        assert!(app.project_cache.is_fresh(CACHE_KEY_PROJECTS));
+    }
+
+    #[tokio::test]
+    async fn load_projects_serves_from_cache() {
+        let fake = FakeLinearApi::new();
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/projects.json")).unwrap();
+        fake.push_response(fixture);
+        let mut app = App::new(fake);
+
+        app.load_projects().await;
+        assert_eq!(app.projects.len(), 2);
+
+        app.projects.clear();
+        app.load_projects().await;
+        assert_eq!(app.projects.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn refresh_projects_bypasses_cache() {
+        let fake = FakeLinearApi::new();
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/projects.json")).unwrap();
+        fake.push_response(fixture.clone());
+        fake.push_response(fixture);
+        let mut app = App::new(fake);
+
+        app.load_projects().await;
+        assert_eq!(app.projects.len(), 2);
+
+        app.refresh_projects().await;
+        assert_eq!(app.projects.len(), 2);
+        assert!(!app.refreshing);
+        assert!(app.project_cache.is_fresh(CACHE_KEY_PROJECTS));
+    }
+
+    #[tokio::test]
+    async fn load_project_issues_fetches_issues() {
+        let fake = FakeLinearApi::new();
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/project_issues.json")).unwrap();
+        fake.push_response(fixture);
+        let mut app = App::new(fake);
+        app.projects = vec![Project {
+            id: "proj-1".into(),
+            name: "Alpha".into(),
+            state: None,
+            progress: None,
+            lead: None,
+            url: None,
+        }];
+        app.project_selected = 0;
+
+        app.load_project_issues().await;
+        assert_eq!(app.project_issues.len(), 2);
+        assert_eq!(app.project_issues[0].identifier, "JEM-10");
+        assert_eq!(app.project_issue_selected, 0);
     }
 
     #[test]
