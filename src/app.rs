@@ -139,6 +139,7 @@ pub struct App<A: LinearApi> {
     pub detail_threads: Vec<ThreadSummary>,
     pub detail_thread_selected: usize,
     pub workspace_picker: Option<WorkspacePicker>,
+    pub show_help: bool,
 }
 
 impl<A: LinearApi> App<A> {
@@ -168,6 +169,7 @@ impl<A: LinearApi> App<A> {
             detail_threads: Vec::new(),
             detail_thread_selected: 0,
             workspace_picker: None,
+            show_help: false,
         }
     }
 
@@ -369,6 +371,14 @@ impl<A: LinearApi> App<A> {
 
     pub fn cancel_workspace_picker(&mut self) {
         self.workspace_picker = None;
+    }
+
+    pub fn toggle_help(&mut self) {
+        self.show_help = !self.show_help;
+    }
+
+    pub fn dismiss_help(&mut self) {
+        self.show_help = false;
     }
 
     pub fn selected_issue_url(&self) -> Option<String> {
@@ -1058,5 +1068,40 @@ mod tests {
     fn awaiting_open_defaults_to_false() {
         let app = app_with_issues();
         assert!(!app.awaiting_open);
+    }
+
+    #[test]
+    fn show_help_defaults_to_false() {
+        let app = app_with_issues();
+        assert!(!app.show_help);
+    }
+
+    #[test]
+    fn toggle_help_shows_and_hides() {
+        let mut app = app_with_issues();
+        assert!(!app.show_help);
+
+        app.toggle_help();
+        assert!(app.show_help);
+
+        app.toggle_help();
+        assert!(!app.show_help);
+    }
+
+    #[test]
+    fn dismiss_help_hides_overlay() {
+        let mut app = app_with_issues();
+        app.toggle_help();
+        assert!(app.show_help);
+
+        app.dismiss_help();
+        assert!(!app.show_help);
+    }
+
+    #[test]
+    fn dismiss_help_is_idempotent() {
+        let mut app = app_with_issues();
+        app.dismiss_help();
+        assert!(!app.show_help);
     }
 }

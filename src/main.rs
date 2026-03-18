@@ -137,12 +137,20 @@ async fn main() -> Result<()> {
                     );
                 }
             }
+            if app.show_help {
+                views::help::render(frame, area);
+            }
         })?;
 
         if event::poll(std::time::Duration::from_millis(100))?
             && let Event::Key(key) = event::read()?
         {
-            if app.workspace_picker.is_some() {
+            if app.show_help {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('?') => app.dismiss_help(),
+                    _ => {}
+                }
+            } else if app.workspace_picker.is_some() {
                 let is_typing = app.workspace_picker.as_ref().is_some_and(|p| p.typing);
                 if is_typing {
                     match key.code {
@@ -305,6 +313,7 @@ async fn main() -> Result<()> {
                             keys::Action::Refresh => app.refresh().await,
                             keys::Action::NewThread => open_workspace_picker(&mut app),
                             keys::Action::OpenIn => app.awaiting_open = true,
+                            keys::Action::Help => app.toggle_help(),
                             _ => {}
                         },
                         app::DetailSection::Body => match action {
@@ -317,6 +326,7 @@ async fn main() -> Result<()> {
                             keys::Action::Tab => app.focus_threads(),
                             keys::Action::NewThread => open_workspace_picker(&mut app),
                             keys::Action::OpenIn => app.awaiting_open = true,
+                            keys::Action::Help => app.toggle_help(),
                             _ => {}
                         },
                     }
@@ -347,6 +357,7 @@ async fn main() -> Result<()> {
                     keys::Action::FilterBy => app.awaiting_filter = true,
                     keys::Action::Refresh => app.refresh().await,
                     keys::Action::OpenIn => app.awaiting_open = true,
+                    keys::Action::Help => app.toggle_help(),
                     _ => {}
                 }
             }
