@@ -10,7 +10,17 @@ use crate::api::client::LinearApi;
 use crate::app::App;
 
 pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
-    let show_bar = app.refreshing || app.awaiting_quit;
+    if app.loading {
+        let loading = Paragraph::new(Line::from(Span::styled(
+            "Loading projects…",
+            Style::default().fg(Color::Yellow),
+        )))
+        .block(Block::default().borders(Borders::ALL).title("Projects"));
+        frame.render_widget(loading, area);
+        return;
+    }
+
+    let show_bar = app.refreshing || app.awaiting_quit || app.error.is_some();
     let chunks = if show_bar {
         Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area)
     } else {
@@ -68,7 +78,14 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
     let key_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
 
     if show_bar {
-        if app.refreshing {
+        if let Some(ref err) = app.error {
+            let line = Line::from(vec![
+                Span::styled("Error: ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                Span::styled(&err.message, Style::default().fg(Color::Red)),
+                Span::styled(" (press Esc to dismiss)", Style::default().fg(Color::DarkGray)),
+            ]);
+            frame.render_widget(Paragraph::new(line), chunks[1]);
+        } else if app.refreshing {
             let line = Line::from(Span::styled(
                 "Refreshing...",
                 Style::default().fg(Color::Yellow),

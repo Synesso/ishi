@@ -143,6 +143,16 @@ async fn main() -> Result<()> {
                     KeyCode::Esc | KeyCode::Char('?') => app.dismiss_help(),
                     _ => {}
                 }
+            } else if app.error.is_some() {
+                match key.code {
+                    KeyCode::Esc => app.dismiss_error(),
+                    KeyCode::Char('r') => {
+                        app.dismiss_error();
+                        app.refresh().await;
+                    }
+                    KeyCode::Char('q') => app.running = false,
+                    _ => {}
+                }
             } else if app.workspace_picker.is_some() {
                 let is_typing = app.workspace_picker.as_ref().is_some_and(|p| p.typing);
                 if is_typing {

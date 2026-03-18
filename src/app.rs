@@ -127,6 +127,42 @@ impl SortDirection {
     }
 }
 
+/// User-friendly error message displayed in the status bar.
+#[derive(Debug, Clone)]
+pub struct AppError {
+    pub message: String,
+}
+
+impl AppError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+
+    /// Classify an `anyhow::Error` into a user-friendly message.
+    pub fn from_api_error(err: &anyhow::Error) -> Self {
+        let msg = format!("{err}");
+        if msg.contains("401") {
+            Self::new("Authentication failed — check your API key")
+        } else if msg.contains("403") {
+            Self::new("Access denied — insufficient permissions")
+        } else if msg.contains("429") {
+            Self::new("Rate limited — please wait and try again")
+        } else if msg.contains("dns error")
+            || msg.contains("connect error")
+            || msg.contains("No connection")
+            || msg.contains("error trying to connect")
+        {
+            Self::new("Network error — check your internet connection")
+        } else if msg.contains("timed out") || msg.contains("timeout") {
+            Self::new("Request timed out — try again")
+        } else {
+            Self::new(format!("API error: {msg}"))
+        }
+    }
+}
+
 pub struct App<A: LinearApi> {
     pub running: bool,
     pub view: View,
@@ -148,6 +184,8 @@ pub struct App<A: LinearApi> {
     pub detail_scroll: u16,
     pub detail_scroll_max: u16,
     pub refreshing: bool,
+    pub loading: bool,
+    pub error: Option<AppError>,
     pub detail_section: DetailSection,
     pub detail_threads: Vec<ThreadSummary>,
     pub detail_thread_selected: usize,
@@ -185,6 +223,8 @@ impl<A: LinearApi> App<A> {
             detail_scroll: 0,
             detail_scroll_max: 0,
             refreshing: false,
+            loading: false,
+            error: None,
             detail_section: DetailSection::Body,
             detail_threads: Vec::new(),
             detail_thread_selected: 0,
@@ -522,29 +562,49 @@ impl<A: LinearApi> App<A> {
         self.selected_project().and_then(|p| p.url.clone())
     }
 
+    pub fn dismiss_error(&mut self) {
+        self.error = None;
+    }
+
     /// Load projects, serving from cache if fresh, otherwise fetching from API.
     pub async fn load_projects(&mut self) {
         if let Some(cached) = self.project_cache.get(CACHE_KEY_PROJECTS) {
             self.projects = cached.clone();
             return;
         }
+        self.loading = self.projects.is_empty();
         self.fetch_and_cache_projects().await;
+        self.loading = false;
     }
 
     async fn fetch_and_cache_projects(&mut self) {
-        if let Ok(projects) = self.api.fetch_projects().await {
-            self.project_cache.insert(CACHE_KEY_PROJECTS, projects.clone());
-            self.projects = projects;
+        match self.api.fetch_projects().await {
+            Ok(projects) => {
+                self.error = None;
+                self.project_cache.insert(CACHE_KEY_PROJECTS, projects.clone());
+                self.projects = projects;
+            }
+            Err(e) => {
+                self.error = Some(AppError::from_api_error(&e));
+            }
         }
     }
 
     pub async fn load_project_issues(&mut self) {
         if let Some(project) = self.selected_project() {
             let project_id = project.id.clone();
-            if let Ok(issues) = self.api.fetch_project_issues(&project_id).await {
-                self.project_issues = issues;
-                self.project_issue_selected = 0;
+            self.loading = self.project_issues.is_empty();
+            match self.api.fetch_project_issues(&project_id).await {
+                Ok(issues) => {
+                    self.error = None;
+                    self.project_issues = issues;
+                    self.project_issue_selected = 0;
+                }
+                Err(e) => {
+                    self.error = Some(AppError::from_api_error(&e));
+                }
             }
+            self.loading = false;
         }
     }
 
@@ -562,7 +622,9 @@ impl<A: LinearApi> App<A> {
             self.issues = cached.clone();
             return;
         }
+        self.loading = self.issues.is_empty();
         self.fetch_and_cache_issues().await;
+        self.loading = false;
     }
 
     /// Force-refresh issues from API, bypassing cache.
@@ -576,15 +638,21 @@ impl<A: LinearApi> App<A> {
 
     async fn fetch_and_cache_issues(&mut self) {
         let selected_id = self.selected_issue().map(|i| i.identifier.clone());
-        if let Ok(issues) = self.api.fetch_my_issues().await {
-            self.cache.insert(CACHE_KEY_MY_ISSUES, issues.clone());
-            self.issues = issues;
-            if let Some(id) = selected_id {
-                let new_index = self
-                    .filtered_issues()
-                    .iter()
-                    .position(|i| i.identifier == id);
-                self.selected = new_index.unwrap_or(0);
+        match self.api.fetch_my_issues().await {
+            Ok(issues) => {
+                self.error = None;
+                self.cache.insert(CACHE_KEY_MY_ISSUES, issues.clone());
+                self.issues = issues;
+                if let Some(id) = selected_id {
+                    let new_index = self
+                        .filtered_issues()
+                        .iter()
+                        .position(|i| i.identifier == id);
+                    self.selected = new_index.unwrap_or(0);
+                }
+            }
+            Err(e) => {
+                self.error = Some(AppError::from_api_error(&e));
             }
         }
     }
@@ -1773,5 +1841,236 @@ mod tests {
         app.refresh().await;
         // After refresh with empty result, cache should have the empty result
         assert!(app.cache.is_fresh(CACHE_KEY_MY_ISSUES));
+    }
+
+    // --- Loading state tests ---
+
+    #[test]
+    fn loading_defaults_to_false() {
+        let app = App::new(FakeLinearApi::new());
+        assert!(!app.loading);
+    }
+
+    #[tokio::test]
+    async fn load_issues_sets_loading_when_empty() {
+        let fake = FakeLinearApi::new();
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/my_issues.json")).unwrap();
+        fake.push_response(fixture);
+        let mut app = App::new(fake);
+
+        assert!(app.issues.is_empty());
+        app.load_issues().await;
+        // After load completes, loading is false
+        assert!(!app.loading);
+        assert!(!app.issues.is_empty());
+    }
+
+    #[tokio::test]
+    async fn load_issues_from_cache_skips_loading() {
+        let fake = FakeLinearApi::new();
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/my_issues.json")).unwrap();
+        fake.push_response(fixture);
+        let mut app = App::new(fake);
+
+        app.load_issues().await;
+        // Clear issues, load again from cache
+        app.issues.clear();
+        app.load_issues().await;
+        assert!(!app.loading);
+    }
+
+    #[tokio::test]
+    async fn load_projects_sets_loading_when_empty() {
+        let fake = FakeLinearApi::new();
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/projects.json")).unwrap();
+        fake.push_response(fixture);
+        let mut app = App::new(fake);
+
+        assert!(app.projects.is_empty());
+        app.load_projects().await;
+        assert!(!app.loading);
+        assert!(!app.projects.is_empty());
+    }
+
+    // --- Error state tests ---
+
+    #[test]
+    fn error_defaults_to_none() {
+        let app = App::new(FakeLinearApi::new());
+        assert!(app.error.is_none());
+    }
+
+    #[test]
+    fn dismiss_error_clears_error() {
+        let mut app = App::new(FakeLinearApi::new());
+        app.error = Some(AppError::new("test error"));
+        app.dismiss_error();
+        assert!(app.error.is_none());
+    }
+
+    #[test]
+    fn dismiss_error_is_idempotent() {
+        let mut app = App::new(FakeLinearApi::new());
+        app.dismiss_error();
+        assert!(app.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn load_issues_sets_error_on_failure() {
+        let fake = FakeLinearApi::new();
+        fake.push_error("HTTP status client error (401 Unauthorized)");
+        let mut app = App::new(fake);
+
+        app.load_issues().await;
+
+        assert!(app.error.is_some());
+        assert!(app.error.as_ref().unwrap().message.contains("Authentication"));
+    }
+
+    #[tokio::test]
+    async fn load_issues_error_preserves_existing_data() {
+        let fake = FakeLinearApi::new();
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/my_issues.json")).unwrap();
+        fake.push_response(fixture);
+        let mut app = App::new(fake);
+
+        app.load_issues().await;
+        assert_eq!(app.issues.len(), 2);
+        assert!(app.error.is_none());
+
+        // Now enqueue an error and refresh
+        app.api.push_error("connection timed out");
+        app.refresh().await;
+
+        // Issues should still be there (graceful degradation)
+        assert_eq!(app.issues.len(), 2);
+        assert!(app.error.is_some());
+        assert!(app.error.as_ref().unwrap().message.contains("timed out"));
+    }
+
+    #[tokio::test]
+    async fn refresh_clears_error_on_success() {
+        let fake = FakeLinearApi::new();
+        fake.push_error("network error");
+        let mut app = App::new(fake);
+
+        app.load_issues().await;
+        assert!(app.error.is_some());
+
+        // Now enqueue a successful response
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/my_issues.json")).unwrap();
+        app.api.push_response(fixture);
+        app.refresh().await;
+
+        assert!(app.error.is_none());
+        assert_eq!(app.issues.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn load_projects_sets_error_on_failure() {
+        let fake = FakeLinearApi::new();
+        fake.push_error("HTTP status client error (429 Too Many Requests)");
+        let mut app = App::new(fake);
+
+        app.load_projects().await;
+
+        assert!(app.error.is_some());
+        assert!(app.error.as_ref().unwrap().message.contains("Rate limited"));
+    }
+
+    #[tokio::test]
+    async fn load_project_issues_sets_error_on_failure() {
+        let fake = FakeLinearApi::new();
+        let proj_fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/projects.json")).unwrap();
+        fake.push_response(proj_fixture);
+        let mut app = App::new(fake);
+
+        app.load_projects().await;
+        assert!(!app.projects.is_empty());
+        app.select_project();
+
+        app.api.push_error("dns error: failed to lookup address");
+        app.load_project_issues().await;
+
+        assert!(app.error.is_some());
+        assert!(app.error.as_ref().unwrap().message.contains("Network error"));
+    }
+
+    // --- AppError classification tests ---
+
+    #[test]
+    fn app_error_classifies_401_as_auth() {
+        let err = anyhow::anyhow!("HTTP status client error (401 Unauthorized)");
+        let app_err = AppError::from_api_error(&err);
+        assert!(app_err.message.contains("Authentication"));
+    }
+
+    #[test]
+    fn app_error_classifies_403_as_access_denied() {
+        let err = anyhow::anyhow!("HTTP status client error (403 Forbidden)");
+        let app_err = AppError::from_api_error(&err);
+        assert!(app_err.message.contains("Access denied"));
+    }
+
+    #[test]
+    fn app_error_classifies_429_as_rate_limit() {
+        let err = anyhow::anyhow!("HTTP status client error (429 Too Many Requests)");
+        let app_err = AppError::from_api_error(&err);
+        assert!(app_err.message.contains("Rate limited"));
+    }
+
+    #[test]
+    fn app_error_classifies_dns_error_as_network() {
+        let err = anyhow::anyhow!("dns error: failed to lookup address");
+        let app_err = AppError::from_api_error(&err);
+        assert!(app_err.message.contains("Network error"));
+    }
+
+    #[test]
+    fn app_error_classifies_connect_error_as_network() {
+        let err = anyhow::anyhow!("error trying to connect: connection refused");
+        let app_err = AppError::from_api_error(&err);
+        assert!(app_err.message.contains("Network error"));
+    }
+
+    #[test]
+    fn app_error_classifies_timeout() {
+        let err = anyhow::anyhow!("request timed out");
+        let app_err = AppError::from_api_error(&err);
+        assert!(app_err.message.contains("timed out"));
+    }
+
+    #[test]
+    fn app_error_fallback_includes_original_message() {
+        let err = anyhow::anyhow!("unexpected server error");
+        let app_err = AppError::from_api_error(&err);
+        assert!(app_err.message.contains("unexpected server error"));
+    }
+
+    #[tokio::test]
+    async fn refresh_projects_sets_error_on_failure() {
+        let fake = FakeLinearApi::new();
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/projects.json")).unwrap();
+        fake.push_response(fixture);
+        let mut app = App::new(fake);
+
+        app.load_projects().await;
+        assert!(!app.projects.is_empty());
+        assert!(app.error.is_none());
+
+        app.api.push_error("HTTP status client error (403 Forbidden)");
+        app.refresh_projects().await;
+
+        assert!(app.error.is_some());
+        assert!(app.error.as_ref().unwrap().message.contains("Access denied"));
+        // Projects should still be there (graceful degradation — only cache was invalidated)
+        assert!(!app.projects.is_empty());
     }
 }

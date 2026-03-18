@@ -9,9 +9,11 @@ use super::types::{Issue, Project};
 /// A fake Linear API client for tests and offline development.
 /// Enqueue responses with `push_response`, and they'll be returned in order by `query`.
 /// PR URL responses are enqueued separately with `push_pr_url`.
+/// Enqueue errors with `push_error` to simulate API failures.
 pub struct FakeLinearApi {
     responses: Mutex<VecDeque<Value>>,
     pr_urls: Mutex<VecDeque<Option<String>>>,
+    errors: Mutex<VecDeque<String>>,
 }
 
 impl FakeLinearApi {
@@ -19,6 +21,7 @@ impl FakeLinearApi {
         Self {
             responses: Mutex::new(VecDeque::new()),
             pr_urls: Mutex::new(VecDeque::new()),
+            errors: Mutex::new(VecDeque::new()),
         }
     }
 
@@ -30,10 +33,18 @@ impl FakeLinearApi {
     pub fn push_pr_url(&self, url: Option<String>) {
         self.pr_urls.lock().unwrap().push_back(url);
     }
+
+    #[allow(dead_code)]
+    pub fn push_error(&self, message: impl Into<String>) {
+        self.errors.lock().unwrap().push_back(message.into());
+    }
 }
 
 impl LinearApi for FakeLinearApi {
     async fn query(&self, _query: &str, _variables: Option<Value>) -> Result<Value> {
+        if let Some(err_msg) = self.errors.lock().unwrap().pop_front() {
+            return Err(anyhow::anyhow!("{}", err_msg));
+        }
         let response = self
             .responses
             .lock()
