@@ -36,6 +36,7 @@ pub const KEYBINDINGS: &[(&str, &str)] = &[
     ("Tab", "Switch section (detail)"),
     ("a", "New Amp thread (detail)"),
     ("p", "Projects"),
+    ("m", "Change issue state"),
 ];
 
 pub fn render(frame: &mut Frame, area: Rect) {

@@ -29,7 +29,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         return;
     }
 
-    let show_bar = app.refreshing || app.awaiting_quit || app.error.is_some();
+    let show_bar = app.refreshing || app.awaiting_quit || app.awaiting_state_change || app.error.is_some();
     let chunks = if show_bar {
         Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area)
     } else {
@@ -111,6 +111,24 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
                 Style::default().fg(Color::Yellow),
             ));
             frame.render_widget(Paragraph::new(line), chunks[1]);
+        } else if app.awaiting_state_change {
+            let mut spans = vec![Span::raw("move to: ")];
+            for (i, state) in app.state_options.iter().enumerate() {
+                if i == app.state_selected {
+                    spans.push(Span::styled(
+                        state.as_str(),
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                } else {
+                    spans.push(Span::raw(state.as_str()));
+                }
+                if i < app.state_options.len() - 1 {
+                    spans.push(Span::raw("  "));
+                }
+            }
+            frame.render_widget(Paragraph::new(Line::from(spans)), chunks[1]);
         } else if app.awaiting_quit {
             let line = Line::from(vec![
                 Span::raw("Press "),

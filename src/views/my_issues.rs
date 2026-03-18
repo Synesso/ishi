@@ -30,6 +30,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         || app.awaiting_sort
         || app.awaiting_filter
         || app.awaiting_open
+        || app.awaiting_state_change
         || app.searching
         || app.search.is_some()
         || app.error.is_some();
@@ -190,6 +191,24 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
             Span::raw("ithub PR"),
         ]);
         frame.render_widget(Paragraph::new(line), chunks[1]);
+    } else if app.awaiting_state_change {
+        let mut spans = vec![Span::raw("move to: ")];
+        for (i, state) in app.state_options.iter().enumerate() {
+            if i == app.state_selected {
+                spans.push(Span::styled(
+                    state.as_str(),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            } else {
+                spans.push(Span::raw(state.as_str()));
+            }
+            if i < app.state_options.len() - 1 {
+                spans.push(Span::raw("  "));
+            }
+        }
+        frame.render_widget(Paragraph::new(Line::from(spans)), chunks[1]);
     } else if app.awaiting_sort {
         let mut spans = vec![Span::raw("sort by: ")];
         spans.extend(column_hints);

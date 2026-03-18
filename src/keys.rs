@@ -20,6 +20,7 @@ pub enum Action {
     RetryRun,
     MarkRunStale,
     Projects,
+    ChangeState,
 }
 
 pub fn map_key(key: KeyEvent) -> Option<Action> {
@@ -44,6 +45,7 @@ pub fn map_key(key: KeyEvent) -> Option<Action> {
         (KeyModifiers::SHIFT, KeyCode::Char('R')) => Some(Action::RetryRun),
         (_, KeyCode::Char('x')) => Some(Action::MarkRunStale),
         (_, KeyCode::Char('p')) => Some(Action::Projects),
+        (_, KeyCode::Char('m')) => Some(Action::ChangeState),
         _ => None,
     }
 }
@@ -184,6 +186,14 @@ mod tests {
         assert!(matches!(
             map_key(key(KeyCode::Char('p'))),
             Some(Action::Projects)
+        ));
+    }
+
+    #[test]
+    fn change_state_on_m() {
+        assert!(matches!(
+            map_key(key(KeyCode::Char('m'))),
+            Some(Action::ChangeState)
         ));
     }
 

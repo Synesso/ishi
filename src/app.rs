@@ -298,6 +298,9 @@ pub struct App<A: LinearApi> {
     pub awaiting_sort: bool,
     pub awaiting_open: bool,
     pub awaiting_thread_run_mode: bool,
+    pub awaiting_state_change: bool,
+    pub state_options: Vec<String>,
+    pub state_selected: usize,
     pub sort: Option<(SortColumn, SortDirection)>,
     pub search: Option<String>,
     pub search_input: String,
@@ -339,6 +342,9 @@ impl<A: LinearApi> App<A> {
             awaiting_sort: false,
             awaiting_open: false,
             awaiting_thread_run_mode: false,
+            awaiting_state_change: false,
+            state_options: Vec::new(),
+            state_selected: 0,
             sort: None,
             search: None,
             search_input: String::new(),
@@ -737,6 +743,64 @@ impl<A: LinearApi> App<A> {
 
     pub fn dismiss_error(&mut self) {
         self.error = None;
+    }
+
+    pub fn start_state_change(&mut self) {
+        const STATES: &[&str] = &[
+            "Backlog", "Todo", "In Progress", "In Review", "Done", "Canceled",
+        ];
+        self.state_options = STATES.iter().map(|s| s.to_string()).collect();
+        let current = self.context_issue().map(|i| i.status_str().to_string());
+        self.state_selected = current
+            .and_then(|c| STATES.iter().position(|s| *s == c))
+            .unwrap_or(0);
+        self.awaiting_state_change = true;
+    }
+
+    pub fn cancel_state_change(&mut self) {
+        self.awaiting_state_change = false;
+        self.state_options.clear();
+        self.state_selected = 0;
+    }
+
+    pub fn state_change_move_down(&mut self) {
+        if !self.state_options.is_empty() && self.state_selected < self.state_options.len() - 1 {
+            self.state_selected += 1;
+        }
+    }
+
+    pub fn state_change_move_up(&mut self) {
+        if self.state_selected > 0 {
+            self.state_selected -= 1;
+        }
+    }
+
+    pub fn selected_state_option(&self) -> Option<&str> {
+        self.state_options.get(self.state_selected).map(|s| s.as_str())
+    }
+
+    /// Apply a state change to the currently selected issue in local data.
+    pub fn apply_local_state_change(&mut self, new_state: &str) {
+        if let Some(issue) = self.context_issue() {
+            let issue_id = issue.id.clone();
+            let identifier = issue.identifier.clone();
+            // Update in my issues list
+            if let Some(issue) = self.issues.iter_mut().find(|i| i.id == issue_id) {
+                issue.state = Some(crate::api::types::IssueState {
+                    name: new_state.to_string(),
+                });
+            }
+            // Update in project issues list
+            if let Some(issue) = self.project_issues.iter_mut().find(|i| i.id == issue_id) {
+                issue.state = Some(crate::api::types::IssueState {
+                    name: new_state.to_string(),
+                });
+            }
+            // Invalidate caches so next refresh gets fresh data
+            self.cache.invalidate(CACHE_KEY_MY_ISSUES);
+            self.project_cache.invalidate(CACHE_KEY_PROJECTS);
+            let _ = identifier; // suppress unused warning
+        }
     }
 
     /// Load projects, serving from cache if fresh, otherwise fetching from API.
@@ -2861,5 +2925,84 @@ mod tests {
         }];
         app.back_to_list();
         assert!(app.detail_session_runs.is_empty());
+    }
+
+    #[test]
+    fn start_state_change_populates_options() {
+        let mut app = app_with_issues();
+        app.start_state_change();
+        assert!(app.awaiting_state_change);
+        assert!(!app.state_options.is_empty());
+        assert_eq!(app.state_selected, 0);
+        assert!(app.state_options.contains(&"In Progress".to_string()));
+        assert!(app.state_options.contains(&"Done".to_string()));
+    }
+
+    #[test]
+    fn cancel_state_change_clears_state() {
+        let mut app = app_with_issues();
+        app.start_state_change();
+        app.state_selected = 2;
+        app.cancel_state_change();
+        assert!(!app.awaiting_state_change);
+        assert!(app.state_options.is_empty());
+        assert_eq!(app.state_selected, 0);
+    }
+
+    #[test]
+    fn state_change_navigation() {
+        let mut app = app_with_issues();
+        app.start_state_change();
+        assert_eq!(app.state_selected, 0);
+
+        app.state_change_move_down();
+        assert_eq!(app.state_selected, 1);
+
+        app.state_change_move_up();
+        assert_eq!(app.state_selected, 0);
+
+        // Cannot go above 0
+        app.state_change_move_up();
+        assert_eq!(app.state_selected, 0);
+    }
+
+    #[test]
+    fn selected_state_option_returns_correct_value() {
+        let mut app = app_with_issues();
+        app.start_state_change();
+        assert_eq!(app.selected_state_option(), Some("Backlog"));
+
+        app.state_change_move_down();
+        assert_eq!(app.selected_state_option(), Some("Todo"));
+    }
+
+    #[test]
+    fn apply_local_state_change_updates_my_issues() {
+        let mut app = app_with_issues();
+        app.selected = 0;
+        app.apply_local_state_change("In Progress");
+        assert_eq!(app.issues[0].status_str(), "In Progress");
+    }
+
+    #[test]
+    fn apply_local_state_change_updates_project_issues() {
+        let mut app = app_with_project_issues();
+        app.project_issue_selected = 0;
+        app.view = View::ProjectDetail;
+        app.apply_local_state_change("Done");
+        assert_eq!(app.project_issues[0].status_str(), "Done");
+    }
+
+    #[test]
+    fn start_state_change_defaults_to_current_state() {
+        let mut app = app_with_issues();
+        // Give the first issue an "In Progress" state
+        app.issues[0].state = Some(crate::api::types::IssueState {
+            name: "In Progress".into(),
+        });
+        app.selected = 0;
+        app.select_issue(); // enter detail view so context_issue() works
+        app.start_state_change();
+        assert_eq!(app.state_selected, 2); // "In Progress" is index 2
     }
 }
