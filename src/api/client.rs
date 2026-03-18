@@ -18,6 +18,7 @@ query {
         id
         identifier
         title
+        url
         state { name }
         priority
         project { name }

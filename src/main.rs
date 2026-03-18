@@ -221,6 +221,15 @@ async fn main() -> Result<()> {
                     KeyCode::Char('q') => app.running = false,
                     _ => {}
                 }
+            } else if app.awaiting_open {
+                app.awaiting_open = false;
+                if let KeyCode::Char('l') = key.code
+                    && let Some(url) = app.selected_issue_url()
+                {
+                    let _ = std::process::Command::new("open")
+                        .arg(&url)
+                        .spawn();
+                }
             } else if app.awaiting_sort {
                 app.awaiting_sort = false;
                 match key.code {
@@ -282,6 +291,7 @@ async fn main() -> Result<()> {
                             keys::Action::Tab => app.focus_body(),
                             keys::Action::Refresh => app.refresh().await,
                             keys::Action::NewThread => open_workspace_picker(&mut app),
+                            keys::Action::OpenIn => app.awaiting_open = true,
                             _ => {}
                         },
                         app::DetailSection::Body => match action {
@@ -293,6 +303,7 @@ async fn main() -> Result<()> {
                             keys::Action::Refresh => app.refresh().await,
                             keys::Action::Tab => app.focus_threads(),
                             keys::Action::NewThread => open_workspace_picker(&mut app),
+                            keys::Action::OpenIn => app.awaiting_open = true,
                             _ => {}
                         },
                     }
@@ -322,6 +333,7 @@ async fn main() -> Result<()> {
                     keys::Action::OrderBy => app.awaiting_sort = true,
                     keys::Action::FilterBy => app.awaiting_filter = true,
                     keys::Action::Refresh => app.refresh().await,
+                    keys::Action::OpenIn => app.awaiting_open = true,
                     _ => {}
                 }
             }

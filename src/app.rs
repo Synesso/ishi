@@ -127,6 +127,7 @@ pub struct App<A: LinearApi> {
     pub awaiting_quit: bool,
     pub awaiting_filter: bool,
     pub awaiting_sort: bool,
+    pub awaiting_open: bool,
     pub sort: Option<(SortColumn, SortDirection)>,
     pub search: Option<String>,
     pub search_input: String,
@@ -155,6 +156,7 @@ impl<A: LinearApi> App<A> {
             awaiting_quit: false,
             awaiting_filter: false,
             awaiting_sort: false,
+            awaiting_open: false,
             sort: None,
             search: None,
             search_input: String::new(),
@@ -369,6 +371,10 @@ impl<A: LinearApi> App<A> {
         self.workspace_picker = None;
     }
 
+    pub fn selected_issue_url(&self) -> Option<String> {
+        self.selected_issue().and_then(|i| i.url.clone())
+    }
+
     pub async fn refresh(&mut self) {
         self.refreshing = true;
         let selected_id = self.selected_issue().map(|i| i.identifier.clone());
@@ -401,6 +407,7 @@ mod tests {
                 id: "1".into(),
                 identifier: "JEM-1".into(),
                 title: "Alpha task".into(),
+                url: Some("https://linear.app/test/issue/JEM-1".into()),
                 state: None,
                 priority: Some(2.0),
                 project: None,
@@ -413,6 +420,7 @@ mod tests {
                 id: "2".into(),
                 identifier: "JEM-2".into(),
                 title: "Beta task".into(),
+                url: Some("https://linear.app/test/issue/JEM-2".into()),
                 state: None,
                 priority: Some(3.0),
                 project: None,
@@ -425,6 +433,7 @@ mod tests {
                 id: "3".into(),
                 identifier: "JEM-3".into(),
                 title: "Gamma task".into(),
+                url: Some("https://linear.app/test/issue/JEM-3".into()),
                 state: None,
                 priority: None,
                 project: None,
@@ -650,6 +659,7 @@ mod tests {
             id: "old".into(),
             identifier: "JEM-1".into(),
             title: "Old issue".into(),
+            url: None,
             state: None,
             priority: None,
             project: None,
@@ -680,8 +690,8 @@ mod tests {
         }));
         let mut app = App::new(fake);
         app.issues = vec![
-            Issue { id: "1".into(), identifier: "JEM-1".into(), title: "Alpha".into(), state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
-            Issue { id: "2".into(), identifier: "JEM-2".into(), title: "Beta".into(), state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
+            Issue { id: "1".into(), identifier: "JEM-1".into(), title: "Alpha".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
+            Issue { id: "2".into(), identifier: "JEM-2".into(), title: "Beta".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
         ];
         app.selected = 1; // JEM-2 selected
 
@@ -702,8 +712,8 @@ mod tests {
         }));
         let mut app = App::new(fake);
         app.issues = vec![
-            Issue { id: "1".into(), identifier: "JEM-1".into(), title: "Alpha".into(), state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
-            Issue { id: "2".into(), identifier: "JEM-2".into(), title: "Beta".into(), state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
+            Issue { id: "1".into(), identifier: "JEM-1".into(), title: "Alpha".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
+            Issue { id: "2".into(), identifier: "JEM-2".into(), title: "Beta".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
         ];
         app.selected = 1; // JEM-2 selected
 
@@ -719,7 +729,7 @@ mod tests {
         // but let's test the error case by not pushing any response (returns empty)
         let mut app = App::new(fake);
         let original_issues = vec![
-            Issue { id: "1".into(), identifier: "JEM-1".into(), title: "Alpha".into(), state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
+            Issue { id: "1".into(), identifier: "JEM-1".into(), title: "Alpha".into(), url: None, state: None, priority: None, project: None, description: None, assignee: None, labels: None, comments: None },
         ];
         app.issues = original_issues.clone();
 
@@ -1008,5 +1018,45 @@ mod tests {
 
         picker.input.pop();
         assert_eq!(picker.input, "/hom");
+    }
+
+    #[test]
+    fn selected_issue_url_returns_url() {
+        let app = app_with_issues();
+        assert_eq!(
+            app.selected_issue_url(),
+            Some("https://linear.app/test/issue/JEM-1".into())
+        );
+    }
+
+    #[test]
+    fn selected_issue_url_returns_none_when_no_issues() {
+        let app = App::new(FakeLinearApi::new());
+        assert!(app.selected_issue_url().is_none());
+    }
+
+    #[test]
+    fn selected_issue_url_returns_none_when_url_missing() {
+        let mut app = App::new(FakeLinearApi::new());
+        app.issues = vec![Issue {
+            id: "1".into(),
+            identifier: "JEM-1".into(),
+            title: "No URL".into(),
+            url: None,
+            state: None,
+            priority: None,
+            project: None,
+            description: None,
+            assignee: None,
+            labels: None,
+            comments: None,
+        }];
+        assert!(app.selected_issue_url().is_none());
+    }
+
+    #[test]
+    fn awaiting_open_defaults_to_false() {
+        let app = app_with_issues();
+        assert!(!app.awaiting_open);
     }
 }

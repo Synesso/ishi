@@ -221,6 +221,12 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
             Span::styled("q", key_style),
             Span::raw(" again to quit"),
         ])
+    } else if app.awaiting_open {
+        Line::from(vec![
+            Span::raw("open in: "),
+            Span::styled("l", key_style),
+            Span::raw("inear"),
+        ])
     } else if app.detail_section == DetailSection::Threads {
         Line::from(vec![
             Span::styled("Esc", key_style),

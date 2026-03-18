@@ -13,7 +13,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
     let issues = app.filtered_issues();
 
     let show_bar = app.refreshing || app.awaiting_quit || app.filtering || app.filter.is_some()
-        || app.awaiting_sort || app.awaiting_filter
+        || app.awaiting_sort || app.awaiting_filter || app.awaiting_open
         || app.searching || app.search.is_some();
     let chunks = if show_bar {
         Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area)
@@ -113,6 +113,13 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
             Span::raw("Press "),
             Span::styled("q", key_style),
             Span::raw(" again to quit"),
+        ]);
+        frame.render_widget(Paragraph::new(line), chunks[1]);
+    } else if app.awaiting_open {
+        let line = Line::from(vec![
+            Span::raw("open in: "),
+            Span::styled("l", key_style),
+            Span::raw("inear"),
         ]);
         frame.render_widget(Paragraph::new(line), chunks[1]);
     } else if app.awaiting_sort {

@@ -15,6 +15,7 @@ pub enum Action {
     Refresh,
     Tab,
     NewThread,
+    OpenIn,
 }
 
 pub fn map_key(key: KeyEvent) -> Option<Action> {
@@ -34,6 +35,7 @@ pub fn map_key(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Char('r')) => Some(Action::Refresh),
         (_, KeyCode::Tab) => Some(Action::Tab),
         (_, KeyCode::Char('a')) => Some(Action::NewThread),
+        (_, KeyCode::Char('o')) => Some(Action::OpenIn),
         _ => None,
     }
 }
@@ -108,6 +110,11 @@ mod tests {
     #[test]
     fn new_thread_on_a() {
         assert!(matches!(map_key(key(KeyCode::Char('a'))), Some(Action::NewThread)));
+    }
+
+    #[test]
+    fn open_in_on_o() {
+        assert!(matches!(map_key(key(KeyCode::Char('o'))), Some(Action::OpenIn)));
     }
 
     #[test]

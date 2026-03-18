@@ -6,6 +6,7 @@ pub struct Issue {
     pub id: String,
     pub identifier: String,
     pub title: String,
+    pub url: Option<String>,
     pub state: Option<IssueState>,
     pub priority: Option<f64>,
     pub project: Option<IssueProject>,
