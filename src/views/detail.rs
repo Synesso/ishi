@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::api::client::LinearApi;
-use crate::app::App;
+use crate::app::{App, DetailSection};
 
 pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
     let issue = match app.selected_issue() {
@@ -68,9 +68,19 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
     // +2 for the border top/bottom
     let meta_height = (meta_lines.len() as u16) + 2;
 
+    // Calculate thread section height
+    let thread_count = app.detail_threads.len();
+    let threads_height = if thread_count > 0 {
+        // header border (1) + each thread line (1 each) + bottom border (1)
+        (thread_count as u16) + 2
+    } else {
+        0
+    };
+
     let chunks = Layout::vertical([
         Constraint::Length(meta_height),
         Constraint::Min(0),
+        Constraint::Length(threads_height),
         Constraint::Length(1),
     ])
     .split(area);
@@ -78,7 +88,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
     // Metadata box
     let title = Line::from(vec![
         Span::styled(
-            format!("{}", issue.identifier),
+            issue.identifier.to_string(),
             Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
         ),
         Span::raw(format!(" — {}", issue.title)),
@@ -97,37 +107,37 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
     }
 
     // Comments
-    if let Some(comments) = &issue.comments {
-        if !comments.nodes.is_empty() {
-            if !body_lines.is_empty() {
-                body_lines.push(Line::raw(""));
-            }
-            body_lines.push(Line::from(Span::styled(
-                format!("Comments ({})", comments.nodes.len()),
-                Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-            )));
+    if let Some(comments) = &issue.comments
+        && !comments.nodes.is_empty()
+    {
+        if !body_lines.is_empty() {
             body_lines.push(Line::raw(""));
+        }
+        body_lines.push(Line::from(Span::styled(
+            format!("Comments ({})", comments.nodes.len()),
+            Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+        )));
+        body_lines.push(Line::raw(""));
 
-            for comment in &comments.nodes {
-                let author = comment
-                    .user
-                    .as_ref()
-                    .map_or("Unknown", |u| u.name.as_str());
-                body_lines.push(Line::from(vec![
-                    Span::styled(
-                        author,
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        format!("  {}", &comment.created_at[..10]),
-                        Style::default().fg(Color::DarkGray),
-                    ),
-                ]));
-                for line in comment.body.lines() {
-                    body_lines.push(Line::raw(format!("  {}", line)));
-                }
-                body_lines.push(Line::raw(""));
+        for comment in &comments.nodes {
+            let author = comment
+                .user
+                .as_ref()
+                .map_or("Unknown", |u| u.name.as_str());
+            body_lines.push(Line::from(vec![
+                Span::styled(
+                    author,
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("  {}", &comment.created_at[..10]),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]));
+            for line in comment.body.lines() {
+                body_lines.push(Line::raw(format!("  {}", line)));
             }
+            body_lines.push(Line::raw(""));
         }
     }
 
@@ -135,14 +145,73 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
     let inner_height = chunks[1].height.saturating_sub(2); // borders
     let scroll = app.detail_scroll;
 
+    let body_focused = app.detail_section == DetailSection::Body;
+    let body_border_style = if body_focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
     let detail = Paragraph::new(body_lines)
-        .block(Block::default().borders(Borders::ALL).title("Description"))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Description")
+                .border_style(body_border_style),
+        )
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
 
     frame.render_widget(detail, chunks[1]);
 
     app.detail_scroll_max = content_lines.saturating_sub(inner_height);
+
+    // Threads section
+    if thread_count > 0 {
+        let threads_focused = app.detail_section == DetailSection::Threads;
+        let threads_border_style = if threads_focused {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+
+        let thread_lines: Vec<Line> = app
+            .detail_threads
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                let is_selected = threads_focused && i == app.detail_thread_selected;
+                let style = if is_selected {
+                    Style::default().add_modifier(Modifier::REVERSED)
+                } else {
+                    Style::default()
+                };
+                let time_str = t.relative_time();
+                Line::from(vec![
+                    Span::styled(
+                        format!("  {} ", t.title),
+                        style,
+                    ),
+                    Span::styled(
+                        format!("({} msgs) ", t.message_count),
+                        style.fg(Color::DarkGray),
+                    ),
+                    Span::styled(
+                        time_str,
+                        style.fg(Color::DarkGray),
+                    ),
+                ])
+            })
+            .collect();
+
+        let threads_block = Paragraph::new(thread_lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!("Threads ({})", thread_count))
+                .border_style(threads_border_style),
+        );
+        frame.render_widget(threads_block, chunks[2]);
+    }
 
     // Status bar
     let key_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
@@ -152,17 +221,36 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
             Span::styled("q", key_style),
             Span::raw(" again to quit"),
         ])
-    } else {
+    } else if app.detail_section == DetailSection::Threads {
         Line::from(vec![
             Span::styled("Esc", key_style),
             Span::raw(" back  "),
             Span::styled("j", key_style),
             Span::raw("/"),
             Span::styled("k", key_style),
-            Span::raw(" scroll"),
+            Span::raw(" navigate  "),
+            Span::styled("Enter", key_style),
+            Span::raw(" continue  "),
+            Span::styled("a", key_style),
+            Span::raw(" new thread"),
         ])
+    } else {
+        let mut spans = vec![
+            Span::styled("Esc", key_style),
+            Span::raw(" back  "),
+            Span::styled("j", key_style),
+            Span::raw("/"),
+            Span::styled("k", key_style),
+            Span::raw(" scroll"),
+        ];
+        if !app.detail_threads.is_empty() {
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled("Tab", key_style));
+            spans.push(Span::raw(" threads"));
+        }
+        Line::from(spans)
     };
-    frame.render_widget(Paragraph::new(bar), chunks[2]);
+    frame.render_widget(Paragraph::new(bar), chunks[3]);
 }
 
 fn status_style(status: &str) -> Style {

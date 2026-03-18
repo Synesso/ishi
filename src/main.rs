@@ -1,3 +1,4 @@
+mod amp;
 mod api;
 mod app;
 mod config;
@@ -15,6 +16,28 @@ use crossterm::{
 };
 use ratatui::{prelude::CrosstermBackend, Terminal};
 use std::io::stdout;
+
+fn load_threads_for_issue(app: &mut App<impl LinearApi>, identifier: &str) {
+    let state_path = match amp::state::state_path() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let state = match amp::state::State::load(&state_path) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let thread_ids = state.thread_ids_for(identifier);
+    if thread_ids.is_empty() {
+        app.detail_threads.clear();
+        return;
+    }
+    let threads_dir = match amp::thread::amp_threads_dir() {
+        Some(d) => d,
+        None => return,
+    };
+    app.detail_threads = amp::thread::load_thread_summaries(&threads_dir, thread_ids);
+    app.detail_thread_selected = 0;
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -104,14 +127,26 @@ async fn main() -> Result<()> {
                 }
             } else if matches!(app.view, app::View::Detail) {
                 if let Some(action) = keys::map_key(key) {
-                    match action {
-                        keys::Action::Quit => app.awaiting_quit = true,
-                        keys::Action::Back => app.back_to_list(),
-                        keys::Action::MoveDown => app.scroll_detail_down(),
-                        keys::Action::MoveUp => app.scroll_detail_up(),
-                        keys::Action::Top => app.detail_scroll = 0,
-                        keys::Action::Refresh => app.refresh().await,
-                        _ => {}
+                    match app.detail_section {
+                        app::DetailSection::Threads => match action {
+                            keys::Action::Quit => app.awaiting_quit = true,
+                            keys::Action::Back => app.focus_body(),
+                            keys::Action::MoveDown => app.thread_move_down(),
+                            keys::Action::MoveUp => app.thread_move_up(),
+                            keys::Action::Tab => app.focus_body(),
+                            keys::Action::Refresh => app.refresh().await,
+                            _ => {}
+                        },
+                        app::DetailSection::Body => match action {
+                            keys::Action::Quit => app.awaiting_quit = true,
+                            keys::Action::Back => app.back_to_list(),
+                            keys::Action::MoveDown => app.scroll_detail_down(),
+                            keys::Action::MoveUp => app.scroll_detail_up(),
+                            keys::Action::Top => app.detail_scroll = 0,
+                            keys::Action::Refresh => app.refresh().await,
+                            keys::Action::Tab => app.focus_threads(),
+                            _ => {}
+                        },
                     }
                 }
             } else if let Some(action) = keys::map_key(key) {
@@ -121,7 +156,13 @@ async fn main() -> Result<()> {
                     keys::Action::MoveUp => app.move_up(),
                     keys::Action::Top => app.top(),
                     keys::Action::Bottom => app.bottom(),
-                    keys::Action::Select => app.select_issue(),
+                    keys::Action::Select => {
+                        let id = app.selected_issue().map(|i| i.identifier.clone());
+                        app.select_issue();
+                        if let Some(id) = id {
+                            load_threads_for_issue(&mut app, &id);
+                        }
+                    }
                     keys::Action::Search => app.start_search(),
                     keys::Action::Back => {
                         if app.search.is_some() {

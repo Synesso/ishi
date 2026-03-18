@@ -19,9 +19,11 @@ Respond with ONLY a single line in this exact format:
 TASK:<issue_identifier>|<issue_title>
 If there are no Backlog issues, respond with exactly: NO_TASKS
 Do not include any other text.
-" 2>&1 | tee "$PICK_LOG"
+" --stream-json 2>"$PICK_LOG.err" \
+    | tee "$PICK_LOG" \
+    | jq --unbuffered -r 'select(.type=="assistant") | .message.content[]? | select(.type=="text") | .text // empty'
 
-  PICK_RESULT=$(cat "$PICK_LOG")
+  PICK_RESULT=$(jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="text") | .text // empty' "$PICK_LOG")
 
   if echo "$PICK_RESULT" | grep -q "NO_TASKS"; then
     echo "=== $(date) === No backlog tasks remaining. Exiting loop."
@@ -62,7 +64,9 @@ Linear issue: $TASK_ID — $TASK_TITLE
    c. Run: jj new
 10. Set the Linear issue $TASK_ID state to 'Done'.
 11. Print a brief summary of what you implemented.
-" 2>&1 | tee "$IMPL_LOG"
+" --stream-json 2>"$IMPL_LOG.err" \
+    | tee "$IMPL_LOG" \
+    | jq --unbuffered -r 'select(.type=="assistant") | .message.content[]? | select(.type=="text") | .text // empty'
 
   echo "=== $(date) === Finished $TASK_ID. Looping..."
   sleep 5

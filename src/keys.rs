@@ -13,6 +13,8 @@ pub enum Action {
     OrderBy,
     FilterBy,
     Refresh,
+    Tab,
+    NewThread,
 }
 
 pub fn map_key(key: KeyEvent) -> Option<Action> {
@@ -30,6 +32,8 @@ pub fn map_key(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Char('s')) => Some(Action::OrderBy),
         (_, KeyCode::Char('f')) => Some(Action::FilterBy),
         (_, KeyCode::Char('r')) => Some(Action::Refresh),
+        (_, KeyCode::Tab) => Some(Action::Tab),
+        (_, KeyCode::Char('a')) => Some(Action::NewThread),
         _ => None,
     }
 }
@@ -97,9 +101,18 @@ mod tests {
     }
 
     #[test]
+    fn tab_maps_to_tab() {
+        assert!(matches!(map_key(key(KeyCode::Tab)), Some(Action::Tab)));
+    }
+
+    #[test]
+    fn new_thread_on_a() {
+        assert!(matches!(map_key(key(KeyCode::Char('a'))), Some(Action::NewThread)));
+    }
+
+    #[test]
     fn unmapped_keys_return_none() {
         assert!(map_key(key(KeyCode::Char('x'))).is_none());
-        assert!(map_key(key(KeyCode::Tab)).is_none());
         assert!(map_key(key(KeyCode::F(1))).is_none());
     }
 }

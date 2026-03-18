@@ -1,7 +1,14 @@
 use std::cmp::Ordering;
 
+use crate::amp::thread::ThreadSummary;
 use crate::api::client::LinearApi;
 use crate::api::types::Issue;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetailSection {
+    Body,
+    Threads,
+}
 
 #[allow(dead_code)]
 pub enum View {
@@ -66,6 +73,9 @@ pub struct App<A: LinearApi> {
     pub detail_scroll: u16,
     pub detail_scroll_max: u16,
     pub refreshing: bool,
+    pub detail_section: DetailSection,
+    pub detail_threads: Vec<ThreadSummary>,
+    pub detail_thread_selected: usize,
 }
 
 impl<A: LinearApi> App<A> {
@@ -90,6 +100,9 @@ impl<A: LinearApi> App<A> {
             detail_scroll: 0,
             detail_scroll_max: 0,
             refreshing: false,
+            detail_section: DetailSection::Body,
+            detail_threads: Vec::new(),
+            detail_thread_selected: 0,
         }
     }
 
@@ -226,12 +239,17 @@ impl<A: LinearApi> App<A> {
         if self.selected < issues.len() {
             self.view = View::Detail;
             self.detail_scroll = 0;
+            self.detail_section = DetailSection::Body;
+            self.detail_thread_selected = 0;
         }
     }
 
     pub fn back_to_list(&mut self) {
         self.view = View::MyIssues;
         self.detail_scroll = 0;
+        self.detail_section = DetailSection::Body;
+        self.detail_threads.clear();
+        self.detail_thread_selected = 0;
     }
 
     pub fn selected_issue(&self) -> Option<&Issue> {
@@ -247,6 +265,29 @@ impl<A: LinearApi> App<A> {
 
     pub fn scroll_detail_up(&mut self) {
         self.detail_scroll = self.detail_scroll.saturating_sub(1);
+    }
+
+    pub fn thread_move_down(&mut self) {
+        let len = self.detail_threads.len();
+        if len > 0 && self.detail_thread_selected < len - 1 {
+            self.detail_thread_selected += 1;
+        }
+    }
+
+    pub fn thread_move_up(&mut self) {
+        if self.detail_thread_selected > 0 {
+            self.detail_thread_selected -= 1;
+        }
+    }
+
+    pub fn focus_threads(&mut self) {
+        if !self.detail_threads.is_empty() {
+            self.detail_section = DetailSection::Threads;
+        }
+    }
+
+    pub fn focus_body(&mut self) {
+        self.detail_section = DetailSection::Body;
     }
 
     pub async fn refresh(&mut self) {
@@ -608,5 +649,79 @@ mod tests {
         // FakeLinearApi with no response returns empty vec (not an error), so issues get replaced
         // This tests that refreshing flag is cleared
         assert!(!app.refreshing);
+    }
+
+    #[test]
+    fn select_issue_resets_thread_state() {
+        let mut app = app_with_issues();
+        app.detail_section = DetailSection::Threads;
+        app.detail_thread_selected = 2;
+        app.select_issue();
+        assert!(matches!(app.detail_section, DetailSection::Body));
+        assert_eq!(app.detail_thread_selected, 0);
+    }
+
+    #[test]
+    fn back_to_list_clears_threads() {
+        let mut app = app_with_issues();
+        app.select_issue();
+        app.detail_threads = vec![ThreadSummary {
+            id: "T-1".into(),
+            title: "Thread".into(),
+            message_count: 5,
+            last_activity_ms: 1700000000000,
+        }];
+        app.detail_section = DetailSection::Threads;
+        app.back_to_list();
+        assert!(matches!(app.detail_section, DetailSection::Body));
+        assert!(app.detail_threads.is_empty());
+        assert_eq!(app.detail_thread_selected, 0);
+    }
+
+    #[test]
+    fn thread_move_down_and_up() {
+        let mut app = app_with_issues();
+        app.detail_threads = vec![
+            ThreadSummary { id: "T-1".into(), title: "A".into(), message_count: 1, last_activity_ms: 0 },
+            ThreadSummary { id: "T-2".into(), title: "B".into(), message_count: 2, last_activity_ms: 0 },
+            ThreadSummary { id: "T-3".into(), title: "C".into(), message_count: 3, last_activity_ms: 0 },
+        ];
+        assert_eq!(app.detail_thread_selected, 0);
+        app.thread_move_down();
+        assert_eq!(app.detail_thread_selected, 1);
+        app.thread_move_down();
+        assert_eq!(app.detail_thread_selected, 2);
+        app.thread_move_down(); // should not exceed
+        assert_eq!(app.detail_thread_selected, 2);
+        app.thread_move_up();
+        assert_eq!(app.detail_thread_selected, 1);
+        app.thread_move_up();
+        assert_eq!(app.detail_thread_selected, 0);
+        app.thread_move_up(); // should not underflow
+        assert_eq!(app.detail_thread_selected, 0);
+    }
+
+    #[test]
+    fn focus_threads_requires_threads() {
+        let mut app = app_with_issues();
+        app.focus_threads();
+        assert!(matches!(app.detail_section, DetailSection::Body));
+
+        app.detail_threads = vec![ThreadSummary {
+            id: "T-1".into(),
+            title: "A".into(),
+            message_count: 1,
+            last_activity_ms: 0,
+        }];
+        app.focus_threads();
+        assert!(matches!(app.detail_section, DetailSection::Threads));
+    }
+
+    #[test]
+    fn focus_body_returns_to_body() {
+        let mut app = app_with_issues();
+        app.detail_section = DetailSection::Threads;
+        app.focus_body();
+        assert!(matches!(app.detail_section, DetailSection::Body));
     }
 }

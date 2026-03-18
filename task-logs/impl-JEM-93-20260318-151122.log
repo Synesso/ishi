@@ -1,0 +1,8 @@
+**Summary — 完了 (かんりょう / Complete):**
+
+Added `src/suspend.rs` with:
+- **`run_external_command()`** — suspends the TUI (leave alt screen → disable raw mode), runs a command blocking with inherited stdio in a given working directory, then restores the TUI (enable raw mode → enter alt screen). Returns the command's `ExitStatus`.
+- **`TerminalControl` trait** — abstracts terminal ops for testability, with a `RealTerminal` implementation for production use.
+- **5 tests** verifying: correct operation sequence, exit status forwarding, working directory, terminal restoration on failure, and error handling for missing programs.
+
+All 45 tests pass, no new clippy warnings. Pushed to `jem-93-suspend-resume`.
