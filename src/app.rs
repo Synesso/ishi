@@ -280,6 +280,14 @@ impl<A: LinearApi> App<A> {
         }
     }
 
+    pub fn selected_thread(&self) -> Option<&ThreadSummary> {
+        if self.detail_section == DetailSection::Threads {
+            self.detail_threads.get(self.detail_thread_selected)
+        } else {
+            None
+        }
+    }
+
     pub fn focus_threads(&mut self) {
         if !self.detail_threads.is_empty() {
             self.detail_section = DetailSection::Threads;
@@ -723,5 +731,40 @@ mod tests {
         app.detail_section = DetailSection::Threads;
         app.focus_body();
         assert!(matches!(app.detail_section, DetailSection::Body));
+    }
+
+    #[test]
+    fn selected_thread_returns_none_when_body_focused() {
+        let mut app = app_with_issues();
+        app.detail_threads = vec![ThreadSummary {
+            id: "T-1".into(),
+            title: "A".into(),
+            message_count: 1,
+            last_activity_ms: 0,
+        }];
+        app.detail_section = DetailSection::Body;
+        assert!(app.selected_thread().is_none());
+    }
+
+    #[test]
+    fn selected_thread_returns_current_when_threads_focused() {
+        let mut app = app_with_issues();
+        app.detail_threads = vec![
+            ThreadSummary { id: "T-1".into(), title: "A".into(), message_count: 1, last_activity_ms: 0 },
+            ThreadSummary { id: "T-2".into(), title: "B".into(), message_count: 2, last_activity_ms: 0 },
+        ];
+        app.detail_section = DetailSection::Threads;
+        app.detail_thread_selected = 0;
+        assert_eq!(app.selected_thread().unwrap().id, "T-1");
+
+        app.detail_thread_selected = 1;
+        assert_eq!(app.selected_thread().unwrap().id, "T-2");
+    }
+
+    #[test]
+    fn selected_thread_returns_none_when_no_threads() {
+        let mut app = app_with_issues();
+        app.detail_section = DetailSection::Threads;
+        assert!(app.selected_thread().is_none());
     }
 }

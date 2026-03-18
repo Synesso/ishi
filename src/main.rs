@@ -16,6 +16,21 @@ use crossterm::{
 };
 use ratatui::{prelude::CrosstermBackend, Terminal};
 use std::io::stdout;
+use std::path::Path;
+
+/// Look up the workspace for a thread from the state file, then run
+/// `amp threads continue <thread_id>` in that workspace directory,
+/// suspending and restoring the TUI around the external process.
+fn continue_thread(thread_id: &str) -> Result<()> {
+    let state_path = amp::state::state_path()?;
+    let state = amp::state::State::load(&state_path)?;
+    let workspace = state
+        .workspace_for(thread_id)
+        .ok_or_else(|| anyhow::anyhow!("no workspace recorded for thread {}", thread_id))?;
+    let workspace_path = Path::new(workspace);
+    suspend::run_external_command("amp", &["threads", "continue", thread_id], workspace_path)?;
+    Ok(())
+}
 
 fn load_threads_for_issue(app: &mut App<impl LinearApi>, identifier: &str) {
     let state_path = match amp::state::state_path() {
@@ -133,6 +148,12 @@ async fn main() -> Result<()> {
                             keys::Action::Back => app.focus_body(),
                             keys::Action::MoveDown => app.thread_move_down(),
                             keys::Action::MoveUp => app.thread_move_up(),
+                            keys::Action::Select => {
+                                if let Some(thread) = app.selected_thread() {
+                                    let thread_id = thread.id.clone();
+                                    let _ = continue_thread(&thread_id);
+                                }
+                            }
                             keys::Action::Tab => app.focus_body(),
                             keys::Action::Refresh => app.refresh().await,
                             _ => {}

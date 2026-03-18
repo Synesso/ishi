@@ -3,11 +3,15 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// Maps Linear issue identifiers (e.g. "JEM-91") to a list of Amp thread IDs.
+/// Maps Linear issue identifiers (e.g. "JEM-91") to a list of Amp thread IDs,
+/// and tracks workspace directories for each thread.
 #[derive(Debug, Serialize, Deserialize, Default, Clone, PartialEq)]
 pub struct State {
     /// issue identifier → list of thread IDs
     pub threads: HashMap<String, Vec<String>>,
+    /// thread ID → workspace directory path
+    #[serde(default)]
+    pub workspaces: HashMap<String, String>,
 }
 
 #[allow(dead_code)]
@@ -45,6 +49,15 @@ impl State {
         if !ids.contains(&thread_id.to_string()) {
             ids.push(thread_id.to_string());
         }
+    }
+
+    pub fn set_workspace(&mut self, thread_id: &str, workspace: &str) {
+        self.workspaces
+            .insert(thread_id.to_string(), workspace.to_string());
+    }
+
+    pub fn workspace_for(&self, thread_id: &str) -> Option<&str> {
+        self.workspaces.get(thread_id).map(|s| s.as_str())
     }
 }
 
@@ -114,5 +127,54 @@ mod tests {
         let state = State::default();
         state.save(&path).unwrap();
         assert!(path.exists());
+    }
+
+    #[test]
+    fn workspace_for_unknown_thread_returns_none() {
+        let state = State::default();
+        assert!(state.workspace_for("T-unknown").is_none());
+    }
+
+    #[test]
+    fn set_and_get_workspace() {
+        let mut state = State::default();
+        state.set_workspace("T-abc", "/home/user/project");
+        assert_eq!(state.workspace_for("T-abc"), Some("/home/user/project"));
+    }
+
+    #[test]
+    fn workspace_round_trips_through_save_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+
+        let mut state = State::default();
+        state.link_thread("JEM-1", "T-abc");
+        state.set_workspace("T-abc", "/workspace/dir");
+        state.save(&path).unwrap();
+
+        let loaded = State::load(&path).unwrap();
+        assert_eq!(loaded.workspace_for("T-abc"), Some("/workspace/dir"));
+        assert_eq!(loaded, state);
+    }
+
+    #[test]
+    fn set_workspace_overwrites_previous() {
+        let mut state = State::default();
+        state.set_workspace("T-abc", "/old/path");
+        state.set_workspace("T-abc", "/new/path");
+        assert_eq!(state.workspace_for("T-abc"), Some("/new/path"));
+    }
+
+    #[test]
+    fn load_legacy_state_without_workspaces() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        // Simulate a state file from before workspaces were added
+        let json = r#"{"threads":{"JEM-1":["T-abc"]}}"#;
+        std::fs::write(&path, json).unwrap();
+
+        let state = State::load(&path).unwrap();
+        assert_eq!(state.thread_ids_for("JEM-1"), &["T-abc"]);
+        assert!(state.workspaces.is_empty());
     }
 }
