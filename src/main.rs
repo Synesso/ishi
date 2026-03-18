@@ -41,7 +41,11 @@ fn load_threads_for_issue(app: &mut App<impl LinearApi>, identifier: &str) {
         Ok(s) => s,
         Err(_) => return,
     };
-    let thread_ids = state.thread_ids_for(identifier);
+    let thread_ids: Vec<String> = state
+        .threads_for_issue(identifier)
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect();
     if thread_ids.is_empty() {
         app.detail_threads.clear();
         return;
@@ -50,7 +54,7 @@ fn load_threads_for_issue(app: &mut App<impl LinearApi>, identifier: &str) {
         Some(d) => d,
         None => return,
     };
-    app.detail_threads = amp::thread::load_thread_summaries(&threads_dir, thread_ids);
+    app.detail_threads = amp::thread::load_thread_summaries(&threads_dir, &thread_ids);
     app.detail_thread_selected = 0;
 }
 
