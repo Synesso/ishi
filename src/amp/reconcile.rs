@@ -195,7 +195,7 @@ mod tests {
 
         assert_eq!(updated, 0);
         assert_eq!(
-            state.session_run("run-1").map(|r| r.status),
+            state.session_runs.get("run-1").map(|r| r.status),
             Some(SessionRunStatus::Pending)
         );
     }
@@ -211,7 +211,7 @@ mod tests {
             reconcile_state_with(&mut state, 100, |pid| Ok(pid == 123), |_| None).unwrap();
 
         assert_eq!(updated, 1);
-        let run = state.session_run("run-1").unwrap();
+        let run = state.session_runs.get("run-1").unwrap();
         assert_eq!(run.status, SessionRunStatus::Running);
         assert_eq!(run.started_at_ms, Some(100));
         assert_eq!(run.finished_at_ms, None);
@@ -236,7 +236,7 @@ mod tests {
 
         assert_eq!(updated, 0);
         assert_eq!(
-            state.session_run("run-1").map(|r| r.status),
+            state.session_runs.get("run-1").map(|r| r.status),
             Some(SessionRunStatus::Running)
         );
     }
@@ -252,7 +252,7 @@ mod tests {
         let updated = reconcile_state_with(&mut state, 200, |_| Ok(false), |_| Some(0)).unwrap();
 
         assert_eq!(updated, 1);
-        let run = state.session_run("run-1").unwrap();
+        let run = state.session_runs.get("run-1").unwrap();
         assert_eq!(run.status, SessionRunStatus::Completed);
         assert_eq!(run.pid, None);
         assert_eq!(run.started_at_ms, Some(50));
@@ -269,7 +269,7 @@ mod tests {
         let updated = reconcile_state_with(&mut state, 300, |_| Ok(false), |_| Some(17)).unwrap();
 
         assert_eq!(updated, 1);
-        let run = state.session_run("run-1").unwrap();
+        let run = state.session_runs.get("run-1").unwrap();
         assert_eq!(run.status, SessionRunStatus::Failed);
         assert_eq!(run.pid, None);
         assert_eq!(run.finished_at_ms, Some(300));
@@ -285,7 +285,7 @@ mod tests {
         let updated = reconcile_state_with(&mut state, 400, |_| Ok(false), |_| None).unwrap();
 
         assert_eq!(updated, 1);
-        let run = state.session_run("run-1").unwrap();
+        let run = state.session_runs.get("run-1").unwrap();
         assert_eq!(run.status, SessionRunStatus::Stale);
         assert_eq!(run.pid, None);
         assert_eq!(run.finished_at_ms, Some(400));
@@ -299,7 +299,7 @@ mod tests {
         let updated = reconcile_state_with(&mut state, 500, |_| Ok(false), |_| Some(0)).unwrap();
 
         assert_eq!(updated, 1);
-        let run = state.session_run("run-1").unwrap();
+        let run = state.session_runs.get("run-1").unwrap();
         assert_eq!(run.status, SessionRunStatus::Completed);
         assert_eq!(run.finished_at_ms, Some(500));
     }
@@ -315,7 +315,7 @@ mod tests {
         let updated = reconcile_state_with(&mut state, 500, |_| Ok(false), |_| None).unwrap();
 
         assert_eq!(updated, 0);
-        let run = state.session_run("run-1").unwrap();
+        let run = state.session_runs.get("run-1").unwrap();
         assert_eq!(run.status, SessionRunStatus::Completed);
         assert_eq!(run.finished_at_ms, Some(150));
         assert_eq!(run.updated_at_ms, 150);
@@ -361,7 +361,7 @@ mod tests {
 
         let reloaded = State::load(&state_path).unwrap();
         assert_eq!(
-            reloaded.session_run("run-1").map(|r| r.status),
+            reloaded.session_runs.get("run-1").map(|r| r.status),
             Some(SessionRunStatus::Completed)
         );
     }

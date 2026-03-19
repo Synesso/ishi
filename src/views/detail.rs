@@ -191,15 +191,6 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
             .iter()
             .map(|ol| {
                 let style = match ol.kind {
-                    OutputKind::Assistant => Style::default(),
-                    OutputKind::Tool => Style::default().fg(Color::Yellow),
-                    OutputKind::ResultSuccess => Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD),
-                    OutputKind::ResultError => Style::default()
-                        .fg(Color::Red)
-                        .add_modifier(Modifier::BOLD),
-                    OutputKind::System => Style::default().fg(Color::DarkGray),
                     OutputKind::User => Style::default().fg(Color::Cyan),
                 };
                 Line::from(Span::styled(ol.text.clone(), style))

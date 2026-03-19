@@ -133,14 +133,6 @@ impl State {
         ids
     }
 
-    /// Look up the workspace directory for a given thread ID.
-    #[allow(dead_code)]
-    pub fn workspace_for(&self, thread_id: &str) -> Option<&str> {
-        self.thread_links
-            .get(thread_id)
-            .map(|link| link.workspace.as_str())
-    }
-
     /// Add a workspace directory to the front of the history.
     /// If it already appears, it is moved to the front.
     pub fn add_workspace(&mut self, workspace: &str) {
@@ -157,18 +149,6 @@ impl State {
     /// If the run already exists, it is updated.
     pub fn add_session_run(&mut self, run_id: &str, run: SessionRun) {
         self.session_runs.insert(run_id.to_string(), run);
-    }
-
-    /// Look up a session run by run ID.
-    #[allow(dead_code)]
-    pub fn session_run(&self, run_id: &str) -> Option<&SessionRun> {
-        self.session_runs.get(run_id)
-    }
-
-    /// Return all session runs keyed by run ID in deterministic key order.
-    #[allow(dead_code)]
-    pub fn session_runs(&self) -> &BTreeMap<String, SessionRun> {
-        &self.session_runs
     }
 
     /// Return session runs for a given issue identifier, sorted by creation time (newest first).
@@ -296,20 +276,10 @@ mod tests {
         state.add_thread_link("T-abc", "JEM-1", "/new/path");
 
         assert_eq!(state.thread_links.len(), 1);
-        assert_eq!(state.workspace_for("T-abc"), Some("/new/path"));
-    }
-
-    #[test]
-    fn workspace_for_unknown_thread_returns_none() {
-        let state = State::default();
-        assert!(state.workspace_for("T-unknown").is_none());
-    }
-
-    #[test]
-    fn workspace_for_known_thread() {
-        let mut state = State::default();
-        state.add_thread_link("T-abc", "JEM-1", "/home/user/project");
-        assert_eq!(state.workspace_for("T-abc"), Some("/home/user/project"));
+        assert_eq!(
+            state.thread_links.get("T-abc").map(|l| l.workspace.as_str()),
+            Some("/new/path")
+        );
     }
 
     #[test]
@@ -333,12 +303,6 @@ mod tests {
     fn workspaces_empty_by_default() {
         let state = State::default();
         assert!(state.workspaces().is_empty());
-    }
-
-    #[test]
-    fn session_runs_empty_by_default() {
-        let state = State::default();
-        assert!(state.session_runs().is_empty());
     }
 
     #[test]
@@ -376,9 +340,9 @@ mod tests {
         );
 
         assert_eq!(state.session_runs.len(), 1);
-        assert_eq!(state.session_run("run-1").and_then(|r| r.pid), Some(222));
+        assert_eq!(state.session_runs.get("run-1").and_then(|r| r.pid), Some(222));
         assert_eq!(
-            state.session_run("run-1").map(|r| r.status),
+            state.session_runs.get("run-1").map(|r| r.status),
             Some(SessionRunStatus::Running)
         );
     }
@@ -421,7 +385,10 @@ mod tests {
         state.save(&path).unwrap();
 
         let loaded = State::load(&path).unwrap();
-        assert_eq!(loaded.workspace_for("T-abc"), Some("/workspace/dir"));
+        assert_eq!(
+            loaded.thread_links.get("T-abc").map(|l| l.workspace.as_str()),
+            Some("/workspace/dir")
+        );
         let threads = loaded.threads_for_issue("JEM-1");
         assert_eq!(threads, vec!["T-abc"]);
     }
@@ -502,7 +469,7 @@ updated_at_ms = 1710000000500
         std::fs::write(&path, toml).unwrap();
 
         let state = State::load(&path).unwrap();
-        let run = state.session_run("run-legacy").unwrap();
+        let run = state.session_runs.get("run-legacy").unwrap();
         assert_eq!(run.status, SessionRunStatus::Pending);
         assert_eq!(run.pid, None);
         assert_eq!(run.log_path, None);
@@ -528,7 +495,7 @@ updated_at_ms = 1710000000500
         state.save(&path).unwrap();
         let reloaded = State::load(&path).unwrap();
 
-        let run = reloaded.session_run("run-legacy").unwrap();
+        let run = reloaded.session_runs.get("run-legacy").unwrap();
         assert_eq!(run.status, SessionRunStatus::Pending);
         assert_eq!(run.pid, None);
         assert_eq!(run.started_at_ms, None);
@@ -561,7 +528,7 @@ updated_at_ms = 1710000000500
         let loaded = State::load(&path).unwrap();
         assert_eq!(loaded, state);
         assert_eq!(
-            loaded.session_run("run-xyz").map(|r| r.status),
+            loaded.session_runs.get("run-xyz").map(|r| r.status),
             Some(SessionRunStatus::Completed)
         );
     }
@@ -691,7 +658,7 @@ updated_at_ms = 1710000000500
         );
 
         assert!(state.mark_session_run_stale("run-1", 99));
-        let run = state.session_run("run-1").unwrap();
+        let run = state.session_runs.get("run-1").unwrap();
         assert_eq!(run.status, SessionRunStatus::Stale);
         assert_eq!(run.pid, None);
         assert_eq!(run.finished_at_ms, Some(99));
@@ -724,7 +691,7 @@ updated_at_ms = 1710000000500
         );
 
         assert!(!state.mark_session_run_stale("run-1", 99));
-        let run = state.session_run("run-1").unwrap();
+        let run = state.session_runs.get("run-1").unwrap();
         assert_eq!(run.finished_at_ms, Some(40));
         assert_eq!(run.updated_at_ms, 50);
     }

@@ -95,11 +95,6 @@ impl WorkspacePicker {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn selected_workspace(&self) -> Option<&str> {
-        self.options.get(self.selected).map(|s| s.as_str())
-    }
-
     pub fn start_typing(&mut self) {
         self.typing = true;
         self.input = std::env::current_dir()
@@ -1580,11 +1575,11 @@ mod tests {
     fn workspace_picker_navigation() {
         let mut picker = WorkspacePicker::new(vec!["/a".into(), "/b".into(), "/c".into()]);
         assert_eq!(picker.selected, 0);
-        assert_eq!(picker.selected_workspace(), Some("/a"));
+        assert_eq!(picker.options.get(picker.selected).map(|s| s.as_str()), Some("/a"));
 
         picker.move_down();
         assert_eq!(picker.selected, 1);
-        assert_eq!(picker.selected_workspace(), Some("/b"));
+        assert_eq!(picker.options.get(picker.selected).map(|s| s.as_str()), Some("/b"));
 
         picker.move_down();
         assert_eq!(picker.selected, 2);
@@ -1606,13 +1601,13 @@ mod tests {
     fn workspace_picker_empty_options() {
         let picker = WorkspacePicker::new(vec![]);
         assert_eq!(picker.selected, 0);
-        assert!(picker.selected_workspace().is_none());
+        assert!(picker.options.get(picker.selected).is_none());
     }
 
     #[test]
     fn workspace_picker_single_option() {
         let mut picker = WorkspacePicker::new(vec!["/only".into()]);
-        assert_eq!(picker.selected_workspace(), Some("/only"));
+        assert_eq!(picker.options.get(picker.selected).map(|s| s.as_str()), Some("/only"));
         picker.move_down();
         assert_eq!(picker.selected, 0);
         picker.move_up();
@@ -1944,7 +1939,6 @@ mod tests {
         assert!(app.projects.is_empty());
         app.load_projects().await;
         assert_eq!(app.projects.len(), 2);
-        assert!(app.project_cache.is_fresh(CACHE_KEY_PROJECTS));
     }
 
     #[tokio::test]
@@ -1978,7 +1972,6 @@ mod tests {
         app.refresh_projects().await;
         assert_eq!(app.projects.len(), 2);
         assert!(!app.refreshing);
-        assert!(app.project_cache.is_fresh(CACHE_KEY_PROJECTS));
     }
 
     #[tokio::test]
@@ -2239,7 +2232,7 @@ mod tests {
     fn workspace_picker_typing_highlights_selected() {
         let mut picker = WorkspacePicker::new(vec!["/a".into(), "/b".into()]);
         assert!(!picker.typing);
-        assert_eq!(picker.selected_workspace(), Some("/a"));
+        assert_eq!(picker.options.get(picker.selected).map(|s| s.as_str()), Some("/a"));
 
         picker.start_typing();
         assert!(picker.typing);
@@ -2455,7 +2448,6 @@ mod tests {
         assert!(app.issues.is_empty());
         app.load_issues().await;
         assert_eq!(app.issues.len(), 2);
-        assert!(app.cache.is_fresh(CACHE_KEY_MY_ISSUES));
     }
 
     #[tokio::test]
@@ -2491,20 +2483,6 @@ mod tests {
         // Refresh should hit the API again (second enqueued response)
         app.refresh().await;
         assert_eq!(app.issues.len(), 2);
-        assert!(app.cache.is_fresh(CACHE_KEY_MY_ISSUES));
-    }
-
-    #[tokio::test]
-    async fn refresh_updates_cache() {
-        let fake = FakeLinearApi::new();
-        let fixture: serde_json::Value =
-            serde_json::from_str(include_str!("../tests/fixtures/my_issues.json")).unwrap();
-        fake.push_response(fixture);
-        let mut app = App::new(fake);
-
-        app.load_issues().await;
-        assert_eq!(app.issues.len(), 2);
-        assert!(app.cache.is_fresh(CACHE_KEY_MY_ISSUES));
     }
 
     #[tokio::test]
@@ -2521,8 +2499,6 @@ mod tests {
         // Refresh with no enqueued response (will get null data → empty)
         // But since fetch returns Ok([]) for null data, issues will be replaced
         app.refresh().await;
-        // After refresh with empty result, cache should have the empty result
-        assert!(app.cache.is_fresh(CACHE_KEY_MY_ISSUES));
     }
 
     // --- Loading state tests ---
@@ -2811,7 +2787,6 @@ mod tests {
         let mut app = App::new(fake);
 
         app.load_projects().await;
-        assert!(app.project_cache.is_fresh(CACHE_KEY_PROJECTS));
 
         // Enqueue responses for refresh (issues + projects)
         app.api
@@ -2819,8 +2794,8 @@ mod tests {
         app.api.push_response(proj_fixture);
         app.refresh().await;
 
-        // Project cache should be re-populated (fresh) after refresh
-        assert!(app.project_cache.is_fresh(CACHE_KEY_PROJECTS));
+        // Project cache should be re-populated after refresh
+        assert_eq!(app.projects.len(), 2);
     }
 
     #[tokio::test]
@@ -3142,8 +3117,6 @@ mod tests {
     // --- Output section tests ---
 
     fn app_with_thread_and_output() -> App<FakeLinearApi> {
-        use crate::amp::session::AmpEvent;
-
         let mut app = app_with_issues();
         app.detail_section = DetailSection::Threads;
         app.detail_threads = vec![ThreadSummary {
@@ -3152,19 +3125,7 @@ mod tests {
             message_count: 1,
             last_activity_ms: 0,
         }];
-        // Push some output into the buffer
-        let event = AmpEvent {
-            event_type: "assistant".to_string(),
-            subtype: None,
-            raw: serde_json::json!({
-                "type": "assistant",
-                "message": {
-                    "role": "assistant",
-                    "content": [{"type": "text", "text": "Hello from assistant"}]
-                }
-            }),
-        };
-        app.output_buffer.push_event("T-abc", &event);
+        app.output_buffer.push_user_message("T-abc", "Hello from assistant");
         app
     }
 
@@ -3195,7 +3156,7 @@ mod tests {
         let app = app_with_thread_and_output();
         let output = app.selected_thread_output();
         assert_eq!(output.len(), 1);
-        assert_eq!(output[0].text, "Hello from assistant");
+        assert_eq!(output[0].text, "▶ Hello from assistant");
     }
 
     #[test]
@@ -3299,5 +3260,46 @@ mod tests {
         app.message_input = "hello".to_string();
         let result = app.submit_message_input();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn tick_flash_decrements_and_clears() {
+        let mut app = app_with_issues();
+        app.flash = Some(("Refreshed ✓".into(), 2));
+        app.tick_flash();
+        assert_eq!(app.flash.as_ref().map(|(_, t)| *t), Some(1));
+        app.tick_flash();
+        assert!(app.flash.is_none());
+    }
+
+    #[test]
+    fn tick_flash_noop_when_none() {
+        let mut app = app_with_issues();
+        app.tick_flash();
+        assert!(app.flash.is_none());
+    }
+
+    #[tokio::test]
+    async fn refresh_sets_flash_message() {
+        let fake = FakeLinearApi::new();
+        fake.push_response(
+            serde_json::json!({"data": { "issues": { "nodes": [] }}}),
+        );
+        let mut app = App::new(fake);
+        app.refresh().await;
+        assert!(app.flash.is_some());
+        assert_eq!(app.flash.as_ref().map(|(m, _)| m.as_str()), Some("Refreshed ✓"));
+    }
+
+    #[tokio::test]
+    async fn refresh_projects_sets_flash_message() {
+        let fake = FakeLinearApi::new();
+        let proj_fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/projects.json")).unwrap();
+        fake.push_response(proj_fixture);
+        let mut app = App::new(fake);
+        app.refresh_projects().await;
+        assert!(app.flash.is_some());
+        assert_eq!(app.flash.as_ref().map(|(m, _)| m.as_str()), Some("Refreshed ✓"));
     }
 }

@@ -4,9 +4,7 @@ use std::time::{Duration, Instant};
 /// A generic in-memory cache with TTL-based expiry.
 ///
 /// Each entry is stored with a timestamp and expires after the configured TTL.
-/// Expired entries are treated as missing (returning `None` from `get`), but the
-/// stale value can still be retrieved via `get_stale` for background-refresh
-/// patterns.
+/// Expired entries are treated as missing (returning `None` from `get`).
 #[derive(Debug)]
 pub struct ResponseCache<V> {
     entries: HashMap<String, CacheEntry<V>>,
@@ -50,30 +48,9 @@ impl<V: Clone> ResponseCache<V> {
         })
     }
 
-    /// Get a cached value regardless of expiry. Returns `None` only if the key
-    /// was never inserted.
-    #[allow(dead_code)]
-    pub fn get_stale(&self, key: &str) -> Option<&V> {
-        self.entries.get(key).map(|entry| &entry.value)
-    }
-
-    /// Returns `true` if the key exists and has not expired.
-    #[allow(dead_code)]
-    pub fn is_fresh(&self, key: &str) -> bool {
-        self.entries
-            .get(key)
-            .is_some_and(|entry| entry.inserted_at.elapsed() < self.ttl)
-    }
-
     /// Remove a specific entry from the cache.
     pub fn invalidate(&mut self, key: &str) {
         self.entries.remove(key);
-    }
-
-    /// Remove all entries from the cache.
-    #[allow(dead_code)]
-    pub fn clear(&mut self) {
-        self.entries.clear();
     }
 }
 
@@ -104,42 +81,6 @@ mod tests {
     }
 
     #[test]
-    fn get_stale_returns_expired_entry() {
-        let mut cache = ResponseCache::new(Duration::from_millis(10));
-        cache.insert("key", "value".to_string());
-        thread::sleep(Duration::from_millis(20));
-        assert!(cache.get("key").is_none());
-        assert_eq!(cache.get_stale("key"), Some(&"value".to_string()));
-    }
-
-    #[test]
-    fn get_stale_returns_none_for_missing_key() {
-        let cache: ResponseCache<String> = ResponseCache::new(Duration::from_secs(60));
-        assert!(cache.get_stale("missing").is_none());
-    }
-
-    #[test]
-    fn is_fresh_returns_true_for_valid_entry() {
-        let mut cache = ResponseCache::new(Duration::from_secs(60));
-        cache.insert("key", 42);
-        assert!(cache.is_fresh("key"));
-    }
-
-    #[test]
-    fn is_fresh_returns_false_for_expired_entry() {
-        let mut cache = ResponseCache::new(Duration::from_millis(10));
-        cache.insert("key", 42);
-        thread::sleep(Duration::from_millis(20));
-        assert!(!cache.is_fresh("key"));
-    }
-
-    #[test]
-    fn is_fresh_returns_false_for_missing_key() {
-        let cache: ResponseCache<i32> = ResponseCache::new(Duration::from_secs(60));
-        assert!(!cache.is_fresh("missing"));
-    }
-
-    #[test]
     fn insert_replaces_existing_entry() {
         let mut cache = ResponseCache::new(Duration::from_secs(60));
         cache.insert("key", "old".to_string());
@@ -153,23 +94,12 @@ mod tests {
         cache.insert("key", 1);
         cache.invalidate("key");
         assert!(cache.get("key").is_none());
-        assert!(cache.get_stale("key").is_none());
     }
 
     #[test]
     fn invalidate_nonexistent_key_is_no_op() {
         let mut cache: ResponseCache<i32> = ResponseCache::new(Duration::from_secs(60));
         cache.invalidate("missing"); // should not panic
-    }
-
-    #[test]
-    fn clear_removes_all_entries() {
-        let mut cache = ResponseCache::new(Duration::from_secs(60));
-        cache.insert("a", 1);
-        cache.insert("b", 2);
-        cache.clear();
-        assert!(cache.get("a").is_none());
-        assert!(cache.get("b").is_none());
     }
 
     #[test]
