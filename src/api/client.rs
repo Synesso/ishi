@@ -149,6 +149,11 @@ pub trait LinearApi: Send + Sync {
         project_id: &str,
     ) -> impl std::future::Future<Output = Result<Vec<Issue>>> + Send;
 
+    fn fetch_team_states(
+        &self,
+        issue_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<String>>> + Send;
+
     fn update_issue_state(
         &self,
         issue_id: &str,
@@ -265,8 +270,37 @@ impl LinearApi for LinearClient {
         Ok(all_issues)
     }
 
+    async fn fetch_team_states(&self, issue_id: &str) -> Result<Vec<String>> {
+        let vars = serde_json::json!({ "issueId": issue_id });
+        let resp = self.query(TEAM_STATES_QUERY, Some(vars)).await?;
+        let states = resp["data"]["issue"]["team"]["states"]["nodes"]
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("failed to fetch workflow states"))?;
+
+        // Linear state types define the workflow category. Sort by lifecycle order.
+        let type_order = |t: &str| match t {
+            "backlog" => 0,
+            "unstarted" => 1,
+            "started" => 2,
+            "completed" => 3,
+            "canceled" => 4,
+            _ => 5,
+        };
+
+        let mut state_entries: Vec<(String, String)> = states
+            .iter()
+            .filter_map(|s| {
+                let name = s["name"].as_str()?.to_string();
+                let stype = s["type"].as_str().unwrap_or("").to_string();
+                Some((name, stype))
+            })
+            .collect();
+        state_entries.sort_by_key(|(_, t)| type_order(t));
+
+        Ok(state_entries.into_iter().map(|(name, _)| name).collect())
+    }
+
     async fn update_issue_state(&self, issue_id: &str, state_name: &str) -> Result<String> {
-        // First, fetch the team's workflow states for the issue
         let vars = serde_json::json!({ "issueId": issue_id });
         let resp = self.query(TEAM_STATES_QUERY, Some(vars)).await?;
         let states = resp["data"]["issue"]["team"]["states"]["nodes"]

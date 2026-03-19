@@ -860,19 +860,14 @@ impl<A: LinearApi> App<A> {
         self.error = None;
     }
 
-    pub fn start_state_change(&mut self) {
-        const STATES: &[&str] = &[
-            "Backlog",
-            "Todo",
-            "In Progress",
-            "In Review",
-            "Done",
-            "Canceled",
-        ];
-        self.state_options = STATES.iter().map(|s| s.to_string()).collect();
+    pub fn start_state_change(&mut self, states: Vec<String>) {
+        if states.is_empty() {
+            return;
+        }
+        self.state_options = states;
         let current = self.context_issue().map(|i| i.status_str().to_string());
         self.state_selected = current
-            .and_then(|c| STATES.iter().position(|s| *s == c))
+            .and_then(|c| self.state_options.iter().position(|s| s == &c))
             .unwrap_or(0);
         self.awaiting_state_change = true;
     }
@@ -3035,10 +3030,21 @@ mod tests {
         assert!(app.detail_session_runs.is_empty());
     }
 
+    fn test_states() -> Vec<String> {
+        vec![
+            "Backlog".into(),
+            "Todo".into(),
+            "In Progress".into(),
+            "In Review".into(),
+            "Done".into(),
+            "Canceled".into(),
+        ]
+    }
+
     #[test]
     fn start_state_change_populates_options() {
         let mut app = app_with_issues();
-        app.start_state_change();
+        app.start_state_change(test_states());
         assert!(app.awaiting_state_change);
         assert!(!app.state_options.is_empty());
         assert_eq!(app.state_selected, 0);
@@ -3047,9 +3053,17 @@ mod tests {
     }
 
     #[test]
+    fn start_state_change_does_nothing_when_empty() {
+        let mut app = app_with_issues();
+        app.start_state_change(vec![]);
+        assert!(!app.awaiting_state_change);
+        assert!(app.state_options.is_empty());
+    }
+
+    #[test]
     fn cancel_state_change_clears_state() {
         let mut app = app_with_issues();
-        app.start_state_change();
+        app.start_state_change(test_states());
         app.state_selected = 2;
         app.cancel_state_change();
         assert!(!app.awaiting_state_change);
@@ -3060,7 +3074,7 @@ mod tests {
     #[test]
     fn state_change_navigation() {
         let mut app = app_with_issues();
-        app.start_state_change();
+        app.start_state_change(test_states());
         assert_eq!(app.state_selected, 0);
 
         app.state_change_move_down();
@@ -3077,7 +3091,7 @@ mod tests {
     #[test]
     fn selected_state_option_returns_correct_value() {
         let mut app = app_with_issues();
-        app.start_state_change();
+        app.start_state_change(test_states());
         assert_eq!(app.selected_state_option(), Some("Backlog"));
 
         app.state_change_move_down();
@@ -3110,7 +3124,7 @@ mod tests {
         });
         app.selected = 0;
         app.select_issue(); // enter detail view so context_issue() works
-        app.start_state_change();
+        app.start_state_change(test_states());
         assert_eq!(app.state_selected, 2); // "In Progress" is index 2
     }
 

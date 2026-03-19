@@ -725,8 +725,15 @@ async fn main() -> Result<()> {
                         keys::Action::Help => app.toggle_help(),
                         keys::Action::OpenIn => app.awaiting_open = true,
                         keys::Action::ChangeState => {
-                            if app.context_issue().is_some() {
-                                app.start_state_change();
+                            if let Some(issue) = app.context_issue() {
+                                let issue_id = issue.id.clone();
+                                match app.api.fetch_team_states(&issue_id).await {
+                                    Ok(states) => app.start_state_change(states),
+                                    Err(err) => {
+                                        app.error =
+                                            Some(app::AppError::new(format!("Failed to fetch states: {err}")));
+                                    }
+                                }
                             }
                         }
                         _ => {}
@@ -840,8 +847,15 @@ async fn main() -> Result<()> {
                         app.load_projects().await;
                     }
                     keys::Action::ChangeState => {
-                        if app.context_issue().is_some() {
-                            app.start_state_change();
+                        if let Some(issue) = app.context_issue() {
+                            let issue_id = issue.id.clone();
+                            match app.api.fetch_team_states(&issue_id).await {
+                                Ok(states) => app.start_state_change(states),
+                                Err(err) => {
+                                    app.error =
+                                        Some(app::AppError::new(format!("Failed to fetch states: {err}")));
+                                }
+                            }
                         }
                     }
                     _ => {}

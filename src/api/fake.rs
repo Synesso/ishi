@@ -14,6 +14,7 @@ pub struct FakeLinearApi {
     responses: Mutex<VecDeque<Value>>,
     pr_urls: Mutex<VecDeque<Option<String>>>,
     errors: Mutex<VecDeque<String>>,
+    team_states: Mutex<VecDeque<Vec<String>>>,
 }
 
 impl FakeLinearApi {
@@ -22,6 +23,7 @@ impl FakeLinearApi {
             responses: Mutex::new(VecDeque::new()),
             pr_urls: Mutex::new(VecDeque::new()),
             errors: Mutex::new(VecDeque::new()),
+            team_states: Mutex::new(VecDeque::new()),
         }
     }
 
@@ -35,6 +37,10 @@ impl FakeLinearApi {
 
     pub fn push_error(&self, message: impl Into<String>) {
         self.errors.lock().unwrap().push_back(message.into());
+    }
+
+    pub fn push_team_states(&self, states: Vec<String>) {
+        self.team_states.lock().unwrap().push_back(states);
     }
 }
 
@@ -102,6 +108,18 @@ impl LinearApi for FakeLinearApi {
             }
         }
         Ok(all_issues)
+    }
+
+    async fn fetch_team_states(&self, _issue_id: &str) -> Result<Vec<String>> {
+        if let Some(err_msg) = self.errors.lock().unwrap().pop_front() {
+            return Err(anyhow::anyhow!("{}", err_msg));
+        }
+        Ok(self
+            .team_states
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or_default())
     }
 
     async fn update_issue_state(&self, _issue_id: &str, state_name: &str) -> Result<String> {
@@ -262,5 +280,28 @@ mod tests {
 
         let url = fake.fetch_pull_request_url("issue-1").await.unwrap();
         assert!(url.is_none());
+    }
+
+    #[tokio::test]
+    async fn fetch_team_states_returns_enqueued_states() {
+        let fake = FakeLinearApi::new();
+        fake.push_team_states(vec![
+            "Backlog".into(),
+            "Todo".into(),
+            "In Progress".into(),
+            "To be deployed".into(),
+            "Done".into(),
+        ]);
+
+        let states = fake.fetch_team_states("issue-1").await.unwrap();
+        assert_eq!(states.len(), 5);
+        assert!(states.contains(&"To be deployed".to_string()));
+    }
+
+    #[tokio::test]
+    async fn fetch_team_states_returns_empty_when_none_enqueued() {
+        let fake = FakeLinearApi::new();
+        let states = fake.fetch_team_states("issue-1").await.unwrap();
+        assert!(states.is_empty());
     }
 }
