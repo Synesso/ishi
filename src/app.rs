@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::time::Duration;
 
+use crate::amp::output::{OutputLine, SessionOutputBuffer};
 use crate::amp::state::SessionRunStatus;
 use crate::amp::thread::ThreadSummary;
 use crate::api::cache::ResponseCache;
@@ -40,6 +41,7 @@ const CACHE_KEY_PROJECTS: &str = "projects";
 pub enum DetailSection {
     Body,
     Threads,
+    Output,
 }
 
 pub enum View {
@@ -334,6 +336,9 @@ pub struct App<A: LinearApi> {
     pub detail_thread_selected: usize,
     pub detail_session_runs: Vec<SessionRunSummary>,
     pub workspace_picker: Option<WorkspacePicker>,
+    pub output_buffer: SessionOutputBuffer,
+    pub detail_output_scroll: u16,
+    pub detail_output_scroll_max: u16,
     pub show_help: bool,
     pub cache: ResponseCache<Vec<Issue>>,
     pub projects: Vec<Project>,
@@ -379,6 +384,9 @@ impl<A: LinearApi> App<A> {
             detail_thread_selected: 0,
             detail_session_runs: Vec::new(),
             workspace_picker: None,
+            output_buffer: SessionOutputBuffer::new(),
+            detail_output_scroll: 0,
+            detail_output_scroll_max: 0,
             show_help: false,
             cache: ResponseCache::new(Duration::from_secs(CACHE_TTL_SECS)),
             projects: Vec::new(),
@@ -544,6 +552,8 @@ impl<A: LinearApi> App<A> {
         self.detail_threads.clear();
         self.detail_thread_selected = 0;
         self.detail_session_runs.clear();
+        self.detail_output_scroll = 0;
+        self.detail_output_scroll_max = 0;
     }
 
     pub fn selected_issue(&self) -> Option<&Issue> {
@@ -633,6 +643,39 @@ impl<A: LinearApi> App<A> {
 
     pub fn focus_body(&mut self) {
         self.detail_section = DetailSection::Body;
+    }
+
+    /// Switch to the output section for the currently selected thread.
+    pub fn focus_output(&mut self) {
+        if let Some(thread) = self.selected_thread() {
+            if self.output_buffer.line_count(&thread.id) > 0 {
+                self.detail_section = DetailSection::Output;
+                self.detail_output_scroll = 0;
+            }
+        }
+    }
+
+    /// Return output lines for the currently selected thread.
+    pub fn selected_thread_output(&self) -> &[OutputLine] {
+        match self.selected_thread() {
+            Some(t) => self.output_buffer.lines_for(&t.id),
+            None => &[],
+        }
+    }
+
+    pub fn scroll_output_down(&mut self) {
+        if self.detail_output_scroll < self.detail_output_scroll_max {
+            self.detail_output_scroll = self.detail_output_scroll.saturating_add(1);
+        }
+    }
+
+    pub fn scroll_output_up(&mut self) {
+        self.detail_output_scroll = self.detail_output_scroll.saturating_sub(1);
+    }
+
+    /// Auto-scroll the output view to the bottom.
+    pub fn scroll_output_to_bottom(&mut self) {
+        self.detail_output_scroll = self.detail_output_scroll_max;
     }
 
     pub fn show_workspace_picker(&mut self, workspaces: Vec<String>) {
@@ -3062,5 +3105,106 @@ mod tests {
         app.select_issue(); // enter detail view so context_issue() works
         app.start_state_change();
         assert_eq!(app.state_selected, 2); // "In Progress" is index 2
+    }
+
+    // --- Output section tests ---
+
+    fn app_with_thread_and_output() -> App<FakeLinearApi> {
+        use crate::amp::session::AmpEvent;
+
+        let mut app = app_with_issues();
+        app.detail_section = DetailSection::Threads;
+        app.detail_threads = vec![ThreadSummary {
+            id: "T-abc".to_string(),
+            title: "Test thread".to_string(),
+            message_count: 1,
+            last_activity_ms: 0,
+        }];
+        // Push some output into the buffer
+        let event = AmpEvent {
+            event_type: "assistant".to_string(),
+            subtype: None,
+            raw: serde_json::json!({
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "Hello from assistant"}]
+                }
+            }),
+        };
+        app.output_buffer.push_event("T-abc", &event);
+        app
+    }
+
+    #[test]
+    fn focus_output_switches_section_when_output_exists() {
+        let mut app = app_with_thread_and_output();
+        app.focus_output();
+        assert_eq!(app.detail_section, DetailSection::Output);
+        assert_eq!(app.detail_output_scroll, 0);
+    }
+
+    #[test]
+    fn focus_output_does_nothing_when_no_output() {
+        let mut app = app_with_issues();
+        app.detail_section = DetailSection::Threads;
+        app.detail_threads = vec![ThreadSummary {
+            id: "T-empty".to_string(),
+            title: "Empty".to_string(),
+            message_count: 0,
+            last_activity_ms: 0,
+        }];
+        app.focus_output();
+        assert_eq!(app.detail_section, DetailSection::Threads);
+    }
+
+    #[test]
+    fn selected_thread_output_returns_lines() {
+        let app = app_with_thread_and_output();
+        let output = app.selected_thread_output();
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0].text, "Hello from assistant");
+    }
+
+    #[test]
+    fn selected_thread_output_empty_when_no_thread_selected() {
+        let mut app = app_with_issues();
+        app.detail_section = DetailSection::Body;
+        let output = app.selected_thread_output();
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn scroll_output_respects_bounds() {
+        let mut app = app_with_thread_and_output();
+        app.detail_output_scroll_max = 5;
+        app.detail_output_scroll = 0;
+
+        app.scroll_output_down();
+        assert_eq!(app.detail_output_scroll, 1);
+
+        app.scroll_output_to_bottom();
+        assert_eq!(app.detail_output_scroll, 5);
+
+        app.scroll_output_down();
+        assert_eq!(app.detail_output_scroll, 5); // can't exceed max
+
+        app.scroll_output_up();
+        assert_eq!(app.detail_output_scroll, 4);
+
+        app.detail_output_scroll = 0;
+        app.scroll_output_up();
+        assert_eq!(app.detail_output_scroll, 0); // can't go below 0
+    }
+
+    #[test]
+    fn back_to_list_clears_output_state() {
+        let mut app = app_with_thread_and_output();
+        app.select_issue();
+        app.detail_output_scroll = 10;
+        app.detail_output_scroll_max = 20;
+        app.back_to_list();
+        assert_eq!(app.detail_output_scroll, 0);
+        assert_eq!(app.detail_output_scroll_max, 0);
     }
 }

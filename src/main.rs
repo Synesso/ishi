@@ -697,6 +697,19 @@ async fn main() -> Result<()> {
             } else if matches!(app.view, app::View::Detail) {
                 if let Some(action) = keys::map_key(key) {
                     match app.detail_section {
+                        app::DetailSection::Output => match action {
+                            keys::Action::Quit => app.awaiting_quit = true,
+                            keys::Action::Back => {
+                                app.detail_section = app::DetailSection::Threads;
+                                app.detail_output_scroll = 0;
+                            }
+                            keys::Action::MoveDown => app.scroll_output_down(),
+                            keys::Action::MoveUp => app.scroll_output_up(),
+                            keys::Action::Top => app.detail_output_scroll = 0,
+                            keys::Action::Bottom => app.scroll_output_to_bottom(),
+                            keys::Action::Help => app.toggle_help(),
+                            _ => {}
+                        },
                         app::DetailSection::Threads => match action {
                             keys::Action::Quit => app.awaiting_quit = true,
                             keys::Action::Back => app.focus_body(),
@@ -710,7 +723,17 @@ async fn main() -> Result<()> {
                             keys::Action::Tab => app.focus_body(),
                             keys::Action::Refresh => refresh_all(&mut app).await,
                             keys::Action::NewThread => open_workspace_picker(&mut app),
-                            keys::Action::OpenIn => app.awaiting_open = true,
+                            keys::Action::OpenIn => {
+                                // In threads context, 'o' opens output view if output exists
+                                if app
+                                    .selected_thread()
+                                    .is_some_and(|t| app.output_buffer.line_count(&t.id) > 0)
+                                {
+                                    app.focus_output();
+                                } else {
+                                    app.awaiting_open = true;
+                                }
+                            }
                             keys::Action::OpenRunLog => {
                                 if let Some(action) =
                                     resolve_run_management_action(&app, keys::Action::OpenRunLog)

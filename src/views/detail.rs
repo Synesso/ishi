@@ -6,6 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
+use crate::amp::output::OutputKind;
 use crate::amp::state::SessionRunStatus;
 use crate::api::client::LinearApi;
 use crate::app::{App, DetailSection};
@@ -75,9 +76,24 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
         0
     };
 
+    // Output section: show when viewing output, or when there's output for the selected thread
+    let has_output = app.detail_section == DetailSection::Output;
+    let output_height: u16 = if has_output {
+        // Take roughly half the remaining space
+        let available = area
+            .height
+            .saturating_sub(meta_height)
+            .saturating_sub(threads_height)
+            .saturating_sub(1);
+        available / 2
+    } else {
+        0
+    };
+
     let chunks = Layout::vertical([
         Constraint::Length(meta_height),
         Constraint::Min(0),
+        Constraint::Length(output_height),
         Constraint::Length(threads_height),
         Constraint::Length(1),
     ])
@@ -165,6 +181,51 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
 
     app.detail_scroll_max = content_lines.saturating_sub(inner_height);
 
+    // Output section
+    if has_output {
+        let output_display: Vec<Line> = app
+            .selected_thread_output()
+            .iter()
+            .map(|ol| {
+                let style = match ol.kind {
+                    OutputKind::Assistant => Style::default(),
+                    OutputKind::Tool => Style::default().fg(Color::Yellow),
+                    OutputKind::ResultSuccess => Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                    OutputKind::ResultError => Style::default()
+                        .fg(Color::Red)
+                        .add_modifier(Modifier::BOLD),
+                    OutputKind::System => Style::default().fg(Color::DarkGray),
+                };
+                Line::from(Span::styled(ol.text.clone(), style))
+            })
+            .collect();
+
+        let output_line_count = output_display.len() as u16;
+        let output_inner = chunks[2].height.saturating_sub(2);
+        let output_scroll = app.detail_output_scroll;
+        app.detail_output_scroll_max = output_line_count.saturating_sub(output_inner);
+
+        let session_indicator = app
+            .selected_thread()
+            .and_then(|t| app.run_status_for_thread(&t.id))
+            .map(|s| format!(" [{}]", s.label()))
+            .unwrap_or_default();
+        let output_title = format!("Output{session_indicator}");
+
+        let output_block = Paragraph::new(output_display)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(output_title)
+                    .border_style(Style::default().fg(Color::Cyan)),
+            )
+            .wrap(Wrap { trim: false })
+            .scroll((output_scroll, 0));
+        frame.render_widget(output_block, chunks[2]);
+    }
+
     // Threads section
     if thread_count > 0 {
         let threads_focused = app.detail_section == DetailSection::Threads;
@@ -225,7 +286,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
                 .title(threads_title)
                 .border_style(threads_border_style),
         );
-        frame.render_widget(threads_block, chunks[2]);
+        frame.render_widget(threads_block, chunks[3]);
     }
 
     // Status bar
@@ -254,6 +315,17 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
             Span::styled("b", key_style),
             Span::raw("ackground"),
         ])
+    } else if app.detail_section == DetailSection::Output {
+        let mut spans = vec![Span::styled("Esc", key_style), Span::raw(" back")];
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled("j", key_style));
+        spans.push(Span::raw("/"));
+        spans.push(Span::styled("k", key_style));
+        spans.push(Span::raw(" scroll"));
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled("G", key_style));
+        spans.push(Span::raw(" bottom"));
+        Line::from(spans)
     } else if app.detail_section == DetailSection::Threads {
         let mut spans = vec![Span::styled("Esc", key_style), Span::raw(" back")];
         if app.detail_threads.len() > 1 {
@@ -273,6 +345,10 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
             spans.push(Span::raw(" retry  "));
             spans.push(Span::styled("x", key_style));
             spans.push(Span::raw(" stale  "));
+        }
+        if app.selected_thread().is_some_and(|t| app.output_buffer.line_count(&t.id) > 0) {
+            spans.push(Span::styled("o", key_style));
+            spans.push(Span::raw(" output  "));
         }
         spans.push(Span::styled("a", key_style));
         spans.push(Span::raw(" new thread"));
@@ -297,7 +373,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
         spans.push(Span::raw(" new thread"));
         Line::from(spans)
     };
-    frame.render_widget(Paragraph::new(bar), chunks[3]);
+    frame.render_widget(Paragraph::new(bar), chunks[4]);
 
     // Workspace picker modal
     if let Some(ref picker) = app.workspace_picker {
