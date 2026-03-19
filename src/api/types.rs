@@ -2,7 +2,6 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Issue {
-    #[allow(dead_code)]
     pub id: String,
     pub identifier: String,
     pub title: String,
@@ -80,24 +79,6 @@ impl Issue {
 #[derive(Debug, Deserialize, Clone)]
 pub struct IssueState {
     pub name: String,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Deserialize)]
-pub struct IssueConnection {
-    pub nodes: Vec<Issue>,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Deserialize)]
-pub struct IssuesData {
-    pub issues: IssueConnection,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Deserialize)]
-pub struct ViewerIssuesResponse {
-    pub data: IssuesData,
 }
 
 #[derive(Debug, Deserialize, Clone)]

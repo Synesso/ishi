@@ -29,12 +29,10 @@ impl FakeLinearApi {
         self.responses.lock().unwrap().push_back(response);
     }
 
-    #[allow(dead_code)]
     pub fn push_pr_url(&self, url: Option<String>) {
         self.pr_urls.lock().unwrap().push_back(url);
     }
 
-    #[allow(dead_code)]
     pub fn push_error(&self, message: impl Into<String>) {
         self.errors.lock().unwrap().push_back(message.into());
     }

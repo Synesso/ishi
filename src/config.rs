@@ -42,16 +42,6 @@ pub fn resolve_api_key() -> Result<String> {
     )
 }
 
-#[allow(dead_code)]
-pub fn store_api_key(key: &str) -> Result<()> {
-    let cfg = Config {
-        api_key: Some(key.to_string()),
-    };
-    let contents = toml::to_string_pretty(&cfg)?;
-    std::fs::write(config_path()?, contents)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

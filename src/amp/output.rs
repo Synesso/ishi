@@ -11,7 +11,6 @@ pub struct OutputLine {
 
 /// The kind of output line, used for styling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum OutputKind {
     /// Assistant text response.
     Assistant,
@@ -31,12 +30,10 @@ pub enum OutputKind {
 /// Each thread accumulates its own output history. The buffer can be queried
 /// for a specific thread's lines and survives navigation away and back.
 #[derive(Debug, Default)]
-#[allow(dead_code)]
 pub struct SessionOutputBuffer {
     buffers: HashMap<String, Vec<OutputLine>>,
 }
 
-#[allow(dead_code)]
 impl SessionOutputBuffer {
     pub fn new() -> Self {
         Self::default()
@@ -87,7 +84,6 @@ impl SessionOutputBuffer {
 }
 
 /// Parse an `AmpEvent` into zero or more display lines.
-#[allow(dead_code)]
 fn parse_event(event: &AmpEvent) -> Vec<OutputLine> {
     let mut lines = Vec::new();
 

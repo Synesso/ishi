@@ -93,7 +93,6 @@ pub struct State {
     pub session_runs: BTreeMap<String, SessionRun>,
 }
 
-#[allow(dead_code)]
 impl State {
     /// Load state from a TOML file, returning default if the file does not exist.
     pub fn load(path: &Path) -> Result<Self> {

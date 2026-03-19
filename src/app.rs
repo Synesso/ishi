@@ -71,7 +71,6 @@ pub struct WorkspacePicker {
     original_options: Vec<String>,
 }
 
-#[allow(dead_code)]
 impl WorkspacePicker {
     pub fn new(options: Vec<String>) -> Self {
         let original_options = options.clone();
@@ -240,17 +239,6 @@ pub enum ProjectSortColumn {
     Status,
     Lead,
     Progress,
-}
-
-impl ProjectSortColumn {
-    pub fn label(&self) -> &'static str {
-        match self {
-            ProjectSortColumn::Name => "Name",
-            ProjectSortColumn::Status => "Status",
-            ProjectSortColumn::Lead => "Lead",
-            ProjectSortColumn::Progress => "Progress",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -497,11 +485,6 @@ impl<A: LinearApi> App<A> {
         self.search = None;
         self.search_input.clear();
         self.selected = 0;
-    }
-
-    #[allow(dead_code)]
-    pub fn start_filter(&mut self) {
-        self.start_column_filter(SortColumn::Title);
     }
 
     pub fn start_column_filter(&mut self, col: SortColumn) {
@@ -1137,7 +1120,7 @@ mod tests {
     #[test]
     fn apply_empty_filter_clears() {
         let mut app = app_with_issues();
-        app.start_filter();
+        app.start_column_filter(SortColumn::Title);
         app.apply_filter();
         assert!(app.filter.is_none());
         assert!(!app.filtering);
@@ -1147,7 +1130,7 @@ mod tests {
     fn apply_filter_sets_and_resets_cursor() {
         let mut app = app_with_issues();
         app.selected = 2;
-        app.start_filter();
+        app.start_column_filter(SortColumn::Title);
         app.filter_input = "gamma".into();
         app.apply_filter();
         assert_eq!(app.filter.as_ref().map(|(_, f)| f.as_str()), Some("gamma"));
@@ -1157,7 +1140,7 @@ mod tests {
     #[test]
     fn cancel_filter_discards_input() {
         let mut app = app_with_issues();
-        app.start_filter();
+        app.start_column_filter(SortColumn::Title);
         app.filter_input = "something".into();
         app.cancel_filter();
         assert!(!app.filtering);

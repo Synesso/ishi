@@ -155,15 +155,6 @@ pub fn load_thread_summaries(threads_dir: &Path, thread_ids: &[String]) -> Vec<T
         .collect()
 }
 
-/// Read a single thread by ID from the default Amp threads directory.
-#[allow(dead_code)]
-pub fn read_thread(id: &str) -> Result<ThreadSummary> {
-    let threads_dir = amp_threads_dir()
-        .ok_or_else(|| anyhow::anyhow!("could not determine Amp threads directory"))?;
-    let path = threads_dir.join(format!("{}.json", id));
-    read_thread_summary(&path)
-}
-
 /// Snapshot all thread IDs from a given directory by listing `*.json` filenames.
 ///
 /// Returns a set of thread IDs (filenames without `.json` extension).
@@ -182,22 +173,10 @@ pub fn snapshot_thread_ids(dir: &Path) -> std::collections::HashSet<String> {
     ids
 }
 
-/// List all thread summaries from the default Amp threads directory.
-///
-/// Scans `~/.local/share/amp/threads/*.json` and parses metadata from each file.
-/// Threads that fail to parse are silently skipped.
-#[allow(dead_code)]
-pub fn list_threads() -> Result<Vec<ThreadSummary>> {
-    let threads_dir = amp_threads_dir()
-        .ok_or_else(|| anyhow::anyhow!("could not determine Amp threads directory"))?;
-    list_threads_in(&threads_dir)
-}
-
 /// List all thread summaries from a given directory.
 ///
 /// Scans `dir/*.json` and parses metadata from each file.
 /// Files that fail to parse are silently skipped.
-#[allow(dead_code)]
 pub fn list_threads_in(dir: &Path) -> Result<Vec<ThreadSummary>> {
     let mut threads = Vec::new();
     for entry in std::fs::read_dir(dir)? {

@@ -19,7 +19,6 @@ struct CacheEntry<V> {
     inserted_at: Instant,
 }
 
-#[allow(dead_code)]
 impl<V: Clone> ResponseCache<V> {
     /// Create a new cache with the given time-to-live for entries.
     pub fn new(ttl: Duration) -> Self {

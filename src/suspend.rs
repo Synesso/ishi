@@ -7,26 +7,6 @@ use std::io::stdout;
 use std::path::Path;
 use std::process::{Command, ExitStatus};
 
-#[allow(dead_code)]
-/// Suspend the TUI, run an external command, then restore the TUI.
-///
-/// Steps:
-/// 1. Leave alternate screen
-/// 2. Disable raw mode
-/// 3. Run the command (blocking, inheriting stdin/stdout/stderr)
-/// 4. Re-enable raw mode
-/// 5. Re-enter alternate screen
-/// 6. Force terminal redraw (via the returned `needs_redraw` signal)
-///
-/// Returns the command's exit status.
-pub fn run_external_command(
-    program: &str,
-    args: &[&str],
-    working_dir: &Path,
-) -> Result<ExitStatus> {
-    run_external_command_with(&mut RealTerminal, program, args, working_dir)
-}
-
 /// Testable version that accepts a [`TerminalControl`] implementation.
 pub fn run_external_command_with<T: TerminalControl>(
     terminal: &mut T,
