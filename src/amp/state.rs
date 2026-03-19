@@ -11,9 +11,10 @@ pub struct ThreadLink {
 }
 
 /// Lifecycle state for a background Amp session run.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionRunStatus {
+    #[default]
     Pending,
     Running,
     Completed,
@@ -30,12 +31,6 @@ impl SessionRunStatus {
             Self::Failed => "failed",
             Self::Stale => "stale",
         }
-    }
-}
-
-impl Default for SessionRunStatus {
-    fn default() -> Self {
-        Self::Pending
     }
 }
 
@@ -139,6 +134,7 @@ impl State {
     }
 
     /// Look up the workspace directory for a given thread ID.
+    #[allow(dead_code)]
     pub fn workspace_for(&self, thread_id: &str) -> Option<&str> {
         self.thread_links
             .get(thread_id)
@@ -164,11 +160,13 @@ impl State {
     }
 
     /// Look up a session run by run ID.
+    #[allow(dead_code)]
     pub fn session_run(&self, run_id: &str) -> Option<&SessionRun> {
         self.session_runs.get(run_id)
     }
 
     /// Return all session runs keyed by run ID in deterministic key order.
+    #[allow(dead_code)]
     pub fn session_runs(&self) -> &BTreeMap<String, SessionRun> {
         &self.session_runs
     }

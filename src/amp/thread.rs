@@ -158,6 +158,7 @@ pub fn load_thread_summaries(threads_dir: &Path, thread_ids: &[String]) -> Vec<T
 /// Snapshot all thread IDs from a given directory by listing `*.json` filenames.
 ///
 /// Returns a set of thread IDs (filenames without `.json` extension).
+#[allow(dead_code)]
 pub fn snapshot_thread_ids(dir: &Path) -> std::collections::HashSet<String> {
     let mut ids = std::collections::HashSet::new();
     if let Ok(entries) = std::fs::read_dir(dir) {
@@ -177,6 +178,7 @@ pub fn snapshot_thread_ids(dir: &Path) -> std::collections::HashSet<String> {
 ///
 /// Scans `dir/*.json` and parses metadata from each file.
 /// Files that fail to parse are silently skipped.
+#[allow(dead_code)]
 pub fn list_threads_in(dir: &Path) -> Result<Vec<ThreadSummary>> {
     let mut threads = Vec::new();
     for entry in std::fs::read_dir(dir)? {

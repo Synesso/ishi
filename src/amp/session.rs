@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// A single JSON event received from the amp process stdout.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct AmpEvent {
     /// Top-level type: "system", "user", "assistant", "result".
     #[serde(rename = "type")]

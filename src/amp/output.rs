@@ -11,6 +11,7 @@ pub struct OutputLine {
 
 /// The kind of output line, used for styling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum OutputKind {
     /// Assistant text response.
     Assistant,
@@ -40,6 +41,7 @@ impl SessionOutputBuffer {
     }
 
     /// Append parsed output lines for an event from a specific thread.
+    #[allow(dead_code)]
     pub fn push_event(&mut self, thread_id: &str, event: &AmpEvent) {
         let lines = parse_event(event);
         if !lines.is_empty() {
@@ -61,6 +63,7 @@ impl SessionOutputBuffer {
     }
 
     /// Clear buffered output for a thread.
+    #[allow(dead_code)]
     pub fn clear_thread(&mut self, thread_id: &str) {
         self.buffers.remove(thread_id);
     }
@@ -84,6 +87,7 @@ impl SessionOutputBuffer {
 }
 
 /// Parse an `AmpEvent` into zero or more display lines.
+#[allow(dead_code)]
 fn parse_event(event: &AmpEvent) -> Vec<OutputLine> {
     let mut lines = Vec::new();
 

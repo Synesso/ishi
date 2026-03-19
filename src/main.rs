@@ -15,7 +15,6 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, prelude::CrosstermBackend};
-use std::collections::HashSet;
 use std::io::stdout;
 use std::path::Path;
 use tokio::sync::mpsc;
@@ -178,56 +177,126 @@ fn build_issue_context(issue: &api::types::Issue) -> String {
     if let Some(project) = &issue.project {
         ctx.push_str(&format!("**Project**: {}\n", project.name));
     }
-    if let Some(labels) = &issue.labels {
-        if !labels.nodes.is_empty() {
-            let names: Vec<&str> = labels.nodes.iter().map(|l| l.name.as_str()).collect();
-            ctx.push_str(&format!("**Labels**: {}\n", names.join(", ")));
-        }
+    if let Some(labels) = &issue.labels
+        && !labels.nodes.is_empty()
+    {
+        let names: Vec<&str> = labels.nodes.iter().map(|l| l.name.as_str()).collect();
+        ctx.push_str(&format!("**Labels**: {}\n", names.join(", ")));
     }
-    if let Some(desc) = &issue.description {
-        if !desc.is_empty() {
-            ctx.push_str(&format!("\n## Description\n\n{}\n", desc));
-        }
+    if let Some(desc) = &issue.description
+        && !desc.is_empty()
+    {
+        ctx.push_str(&format!("\n## Description\n\n{}\n", desc));
     }
     ctx
 }
 
-/// Execute the new-thread flow:
-/// 1. Snapshot thread IDs
-/// 2. Suspend TUI, launch `amp` piping issue context to stdin
-/// 3. Diff thread IDs to detect the new thread
-/// 4. If found, save thread link and update workspace history
-fn start_new_thread(
-    issue_identifier: &str,
-    workspace: &str,
-    before_ids: &HashSet<String>,
-    issue_context: Option<&str>,
-) -> Result<()> {
+/// Open `$EDITOR` with `initial_content` in a temp file. Returns the edited
+/// content, or `None` if the user cleared the file or the editor failed.
+fn edit_prompt(initial_content: &str) -> Result<Option<String>> {
+    let tmp = tempfile::Builder::new()
+        .prefix("ishi-prompt-")
+        .suffix(".md")
+        .tempfile()?;
+    std::fs::write(tmp.path(), initial_content)?;
+
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+    let status = suspend::run_external_command_with(
+        &mut suspend::RealTerminal,
+        &editor,
+        &[tmp.path().to_str().unwrap_or("")],
+        &std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+    )?;
+    if !status.success() {
+        return Ok(None);
+    }
+    let content = std::fs::read_to_string(tmp.path())?;
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(trimmed.to_string()))
+    }
+}
+
+/// Execute the new-thread flow (background-first):
+/// 1. Suspend TUI, open `$EDITOR` with issue context for the user to refine
+/// 2. Create a thread via `amp threads new`
+/// 3. Spawn `amp threads continue <id> -x` in background with the prompt
+/// 4. Record thread link + session run in state, return immediately
+fn start_new_thread(issue_identifier: &str, workspace: &str, prompt: &str) -> Result<()> {
     let workspace_path = Path::new(workspace);
 
-    suspend::run_external_command_with_stdin(
-        &mut suspend::RealTerminal,
-        "amp",
-        &[],
-        workspace_path,
-        issue_context,
-    )?;
-
-    // Diff thread IDs to find the newly created thread
-    let threads_dir = match amp::thread::amp_threads_dir() {
-        Some(d) => d,
-        None => return Ok(()),
-    };
-    let after_ids = amp::thread::snapshot_thread_ids(&threads_dir);
-    let new_ids: Vec<&String> = after_ids.difference(before_ids).collect();
-
-    if let Some(new_thread_id) = new_ids.first() {
-        let state_path = amp::state::state_path()?;
-        let mut state = amp::state::State::load(&state_path)?;
-        state.add_thread_link(new_thread_id, issue_identifier, workspace);
-        state.add_workspace(workspace);
-        state.save(&state_path)?;
+    // Create a new thread via `amp threads new`
+    let new_output = std::process::Command::new("amp")
+        .args(["threads", "new"])
+        .current_dir(workspace_path)
+        .output()
+        .context("failed to run `amp threads new`")?;
+    if !new_output.status.success() {
+        anyhow::bail!(
+            "amp threads new failed: {}",
+            String::from_utf8_lossy(&new_output.stderr)
+        );
     }
+    let thread_id = String::from_utf8_lossy(&new_output.stdout).trim().to_string();
+    if thread_id.is_empty() {
+        anyhow::bail!("amp threads new returned empty thread ID");
+    }
+
+    // Prepare log file
+    let log_dir = dirs::cache_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .join("ishi")
+        .join("run-logs");
+    std::fs::create_dir_all(&log_dir)?;
+    let log_path = log_dir.join(format!("{}.log", thread_id));
+    let log_file = std::fs::File::create(&log_path)?;
+
+    // Spawn background: echo prompt | amp threads continue <id> -x --no-notifications --dangerously-allow-all > log 2>&1
+    // Append exit code marker when done, mirroring the reconcile convention.
+    let shell_cmd = format!(
+        r#"echo {prompt} | amp threads continue {thread_id} -x --no-notifications --dangerously-allow-all >> {log} 2>&1; echo "{marker}$?" >> {log}"#,
+        prompt = shell_escape::unix::escape(prompt.into()),
+        thread_id = shell_escape::unix::escape(thread_id.as_str().into()),
+        log = shell_escape::unix::escape(log_path.to_string_lossy().into_owned().into()),
+        marker = amp::run::EXIT_CODE_MARKER_PREFIX,
+    );
+
+    let child = std::process::Command::new("sh")
+        .args(["-c", &shell_cmd])
+        .current_dir(workspace_path)
+        .stdin(std::process::Stdio::null())
+        .stdout(log_file.try_clone()?)
+        .stderr(log_file)
+        .spawn()
+        .context("failed to spawn background amp session")?;
+
+    let pid = child.id();
+    let now = now_ms();
+    let run_id = format!("run-{}-{}", thread_id, now);
+
+    // Persist thread link + session run
+    let state_path = amp::state::state_path()?;
+    let mut state = amp::state::State::load(&state_path)?;
+    state.add_thread_link(&thread_id, issue_identifier, workspace);
+    state.add_workspace(workspace);
+    state.add_session_run(
+        &run_id,
+        amp::state::SessionRun {
+            thread_id: thread_id.clone(),
+            issue: issue_identifier.to_string(),
+            workspace: workspace.to_string(),
+            pid: Some(pid),
+            status: amp::state::SessionRunStatus::Pending,
+            log_path: Some(log_path.to_string_lossy().to_string()),
+            created_at_ms: now,
+            updated_at_ms: now,
+            started_at_ms: None,
+            finished_at_ms: None,
+        },
+    );
+    state.save(&state_path)?;
 
     Ok(())
 }
@@ -316,38 +385,41 @@ async fn main() -> Result<()> {
                         KeyCode::Enter => {
                             // If the input is empty, adopt the selected option
                             // as the input path before confirming.
-                            if let Some(ref mut picker) = app.workspace_picker {
-                                if picker.input.is_empty() {
-                                    if let Some(ws) = picker.options.get(picker.selected) {
-                                        picker.input = ws.clone();
-                                    }
-                                }
+                            if let Some(ref mut picker) = app.workspace_picker
+                                && picker.input.is_empty()
+                                && let Some(ws) = picker.options.get(picker.selected)
+                            {
+                                picker.input = ws.clone();
                             }
                             let typed_path = app
                                 .workspace_picker
                                 .as_mut()
                                 .and_then(|p| p.confirm_typed_path());
                             if let (Some(workspace), Some(issue)) =
-                                (typed_path, app.selected_issue())
+                                (typed_path, app.context_issue())
                             {
                                 let issue_id = issue.identifier.clone();
                                 let context = build_issue_context(issue);
                                 app.workspace_picker = None;
-                                let before_ids = amp::thread::amp_threads_dir()
-                                    .map(|d| amp::thread::snapshot_thread_ids(&d))
-                                    .unwrap_or_default();
-                                if let Err(err) = start_new_thread(
-                                    &issue_id,
-                                    &workspace,
-                                    &before_ids,
-                                    Some(&context),
-                                ) {
-                                    app.error = Some(app::AppError::new(format!(
-                                        "Failed to start thread: {err}"
-                                    )));
-                                } else {
-                                    terminal.clear()?;
-                                    refresh_all(&mut app).await;
+                                match edit_prompt(&context) {
+                                    Ok(Some(prompt)) => {
+                                        if let Err(err) =
+                                            start_new_thread(&issue_id, &workspace, &prompt)
+                                        {
+                                            app.error = Some(app::AppError::new(format!(
+                                                "Failed to start thread: {err}"
+                                            )));
+                                        } else {
+                                            terminal.clear()?;
+                                            refresh_all(&mut app).await;
+                                        }
+                                    }
+                                    Ok(None) => {} // user cancelled
+                                    Err(err) => {
+                                        app.error = Some(app::AppError::new(format!(
+                                            "Editor failed: {err}"
+                                        )));
+                                    }
                                 }
                             }
                         }
@@ -392,27 +464,31 @@ async fn main() -> Result<()> {
                     match key.code {
                         KeyCode::Enter => {
                             let picker = app.workspace_picker.take();
-                            if let (Some(picker), Some(issue)) = (picker, app.selected_issue())
+                            if let (Some(picker), Some(issue)) = (picker, app.context_issue())
                                 && let Some(workspace) = picker.options.get(picker.selected)
                             {
                                 let issue_id = issue.identifier.clone();
                                 let context = build_issue_context(issue);
                                 let workspace = workspace.clone();
-                                let before_ids = amp::thread::amp_threads_dir()
-                                    .map(|d| amp::thread::snapshot_thread_ids(&d))
-                                    .unwrap_or_default();
-                                if let Err(err) = start_new_thread(
-                                    &issue_id,
-                                    &workspace,
-                                    &before_ids,
-                                    Some(&context),
-                                ) {
-                                    app.error = Some(app::AppError::new(format!(
-                                        "Failed to start thread: {err}"
-                                    )));
-                                } else {
-                                    terminal.clear()?;
-                                    refresh_all(&mut app).await;
+                                match edit_prompt(&context) {
+                                    Ok(Some(prompt)) => {
+                                        if let Err(err) =
+                                            start_new_thread(&issue_id, &workspace, &prompt)
+                                        {
+                                            app.error = Some(app::AppError::new(format!(
+                                                "Failed to start thread: {err}"
+                                            )));
+                                        } else {
+                                            terminal.clear()?;
+                                            refresh_all(&mut app).await;
+                                        }
+                                    }
+                                    Ok(None) => {} // user cancelled
+                                    Err(err) => {
+                                        app.error = Some(app::AppError::new(format!(
+                                            "Editor failed: {err}"
+                                        )));
+                                    }
                                 }
                             }
                         }
@@ -437,9 +513,8 @@ async fn main() -> Result<()> {
                 }
             } else if app.awaiting_quit {
                 app.awaiting_quit = false;
-                match key.code {
-                    KeyCode::Char('q') => app.running = false,
-                    _ => {}
+                if let KeyCode::Char('q') = key.code {
+                    app.running = false;
                 }
             } else if app.awaiting_open {
                 app.awaiting_open = false;
@@ -802,5 +877,82 @@ mod tests {
             }
             _ => panic!("expected mark-stale action"),
         }
+    }
+
+    fn minimal_issue() -> Issue {
+        Issue {
+            id: "1".into(),
+            identifier: "JEM-42".into(),
+            title: "Fix the widget".into(),
+            url: None,
+            state: None,
+            priority: None,
+            project: None,
+            description: None,
+            assignee: None,
+            labels: None,
+            comments: None,
+        }
+    }
+
+    #[test]
+    fn build_issue_context_minimal() {
+        let ctx = build_issue_context(&minimal_issue());
+        assert!(ctx.starts_with("# JEM-42 Fix the widget\n"));
+        assert!(!ctx.contains("Status"));
+        assert!(!ctx.contains("Project"));
+        assert!(!ctx.contains("Description"));
+    }
+
+    #[test]
+    fn build_issue_context_includes_all_fields() {
+        use crate::api::types::*;
+        let issue = Issue {
+            url: Some("https://linear.app/issue/JEM-42".into()),
+            state: Some(IssueState {
+                name: "In Progress".into(),
+            }),
+            project: Some(IssueProject {
+                name: "ishi".into(),
+            }),
+            labels: Some(IssueLabels {
+                nodes: vec![
+                    IssueLabel { name: "bug".into() },
+                    IssueLabel {
+                        name: "urgent".into(),
+                    },
+                ],
+            }),
+            description: Some("Describe the problem in detail.".into()),
+            ..minimal_issue()
+        };
+        let ctx = build_issue_context(&issue);
+        assert!(ctx.contains("https://linear.app/issue/JEM-42"));
+        assert!(ctx.contains("**Status**: In Progress"));
+        assert!(ctx.contains("**Project**: ishi"));
+        assert!(ctx.contains("**Labels**: bug, urgent"));
+        assert!(ctx.contains("## Description"));
+        assert!(ctx.contains("Describe the problem in detail."));
+    }
+
+    #[test]
+    fn build_issue_context_skips_empty_description() {
+        let issue = Issue {
+            description: Some("".into()),
+            ..minimal_issue()
+        };
+        let ctx = build_issue_context(&issue);
+        assert!(!ctx.contains("Description"));
+    }
+
+    #[test]
+    fn build_issue_context_skips_empty_labels() {
+        use crate::api::types::*;
+        let issue = Issue {
+            labels: Some(IssueLabels { nodes: vec![] }),
+            ..minimal_issue()
+        };
+        let ctx = build_issue_context(&issue);
+        assert!(!ctx.contains("Labels"));
     }
 }

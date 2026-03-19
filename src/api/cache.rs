@@ -52,11 +52,13 @@ impl<V: Clone> ResponseCache<V> {
 
     /// Get a cached value regardless of expiry. Returns `None` only if the key
     /// was never inserted.
+    #[allow(dead_code)]
     pub fn get_stale(&self, key: &str) -> Option<&V> {
         self.entries.get(key).map(|entry| &entry.value)
     }
 
     /// Returns `true` if the key exists and has not expired.
+    #[allow(dead_code)]
     pub fn is_fresh(&self, key: &str) -> bool {
         self.entries
             .get(key)
@@ -69,6 +71,7 @@ impl<V: Clone> ResponseCache<V> {
     }
 
     /// Remove all entries from the cache.
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.entries.clear();
     }

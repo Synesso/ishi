@@ -95,6 +95,7 @@ impl WorkspacePicker {
         }
     }
 
+    #[allow(dead_code)]
     pub fn selected_workspace(&self) -> Option<&str> {
         self.options.get(self.selected).map(|s| s.as_str())
     }
@@ -634,11 +635,11 @@ impl<A: LinearApi> App<A> {
 
     /// Switch to the output section for the currently selected thread.
     pub fn focus_output(&mut self) {
-        if let Some(thread) = self.selected_thread() {
-            if self.output_buffer.line_count(&thread.id) > 0 {
-                self.detail_section = DetailSection::Output;
-                self.detail_output_scroll = 0;
-            }
+        if let Some(thread) = self.selected_thread()
+            && self.output_buffer.line_count(&thread.id) > 0
+        {
+            self.detail_section = DetailSection::Output;
+            self.detail_output_scroll = 0;
         }
     }
 
