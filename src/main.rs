@@ -26,9 +26,6 @@ enum BgMessage {
 }
 
 enum RunManagementAction {
-    OpenLog {
-        log_path: String,
-    },
     MarkStale {
         run_id: String,
     },
@@ -39,11 +36,6 @@ fn resolve_run_management_action(
     action: keys::Action,
 ) -> Option<RunManagementAction> {
     match action {
-        keys::Action::OpenRunLog => {
-            let run = app.selected_thread_run()?;
-            let log_path = run.log_path.clone()?;
-            Some(RunManagementAction::OpenLog { log_path })
-        }
         keys::Action::MarkRunStale => {
             let run = app.selected_thread_run()?;
             Some(RunManagementAction::MarkStale {
@@ -69,12 +61,6 @@ async fn execute_run_management_action(
     action: RunManagementAction,
 ) -> Result<()> {
     match action {
-        RunManagementAction::OpenLog { log_path } => {
-            std::process::Command::new("open")
-                .arg(&log_path)
-                .spawn()
-                .with_context(|| format!("failed to open run log at {log_path}"))?;
-        }
         RunManagementAction::MarkStale { run_id } => {
             if mark_session_run_stale(&run_id)? {
                 refresh_all(app).await;
@@ -758,6 +744,20 @@ async fn main() -> Result<()> {
                             keys::Action::Help => app.toggle_help(),
                             _ => {}
                         },
+                        app::DetailSection::RunLog => match action {
+                            keys::Action::Quit => app.awaiting_quit = true,
+                            keys::Action::Back => {
+                                app.detail_section = app::DetailSection::Threads;
+                                app.run_log_lines.clear();
+                                app.run_log_scroll = 0;
+                            }
+                            keys::Action::MoveDown => app.scroll_run_log_down(),
+                            keys::Action::MoveUp => app.scroll_run_log_up(),
+                            keys::Action::Top => app.run_log_scroll = 0,
+                            keys::Action::Bottom => app.scroll_run_log_to_bottom(),
+                            keys::Action::Help => app.toggle_help(),
+                            _ => {}
+                        },
                         app::DetailSection::Threads => match action {
                             keys::Action::Quit => app.awaiting_quit = true,
                             keys::Action::Back => app.focus_body(),
@@ -778,14 +778,10 @@ async fn main() -> Result<()> {
                                 }
                             }
                             keys::Action::OpenRunLog => {
-                                if let Some(action) =
-                                    resolve_run_management_action(&app, keys::Action::OpenRunLog)
-                                    && let Err(err) =
-                                        execute_run_management_action(&mut app, action).await
+                                if let Some(run) = app.selected_thread_run()
+                                    && let Some(log_path) = run.log_path.clone()
                                 {
-                                    app.error = Some(app::AppError::new(format!(
-                                        "Failed to open run log: {err}"
-                                    )));
+                                    app.focus_run_log(&log_path);
                                 }
                             }
                             keys::Action::MarkRunStale => {
@@ -911,30 +907,6 @@ mod tests {
             created_at_ms: 100,
         }];
         app
-    }
-
-    #[test]
-    fn resolves_open_log_management_action() {
-        let app = app_with_issue_and_thread();
-
-        let action = resolve_run_management_action(&app, keys::Action::OpenRunLog);
-
-        match action {
-            Some(RunManagementAction::OpenLog { log_path }) => {
-                assert_eq!(log_path, "/tmp/run-1.log");
-            }
-            _ => panic!("expected open-log action"),
-        }
-    }
-
-    #[test]
-    fn open_log_management_action_requires_log_path() {
-        let mut app = app_with_issue_and_thread();
-        app.detail_session_runs[0].log_path = None;
-
-        let action = resolve_run_management_action(&app, keys::Action::OpenRunLog);
-
-        assert!(action.is_none());
     }
 
     #[test]

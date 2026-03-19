@@ -12,6 +12,11 @@ use crate::api::client::LinearApi;
 use crate::app::{App, DetailSection};
 
 pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
+    if app.detail_section == DetailSection::RunLog {
+        render_run_log(frame, area, app);
+        return;
+    }
+
     let issue = match app.selected_issue() {
         Some(i) => i,
         None => {
@@ -475,6 +480,52 @@ fn priority_style(priority: &str) -> Style {
         "Low" => Style::default().fg(Color::DarkGray),
         _ => Style::default(),
     }
+}
+
+fn render_run_log<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
+    let chunks = Layout::vertical([
+        Constraint::Min(0),
+        Constraint::Length(1),
+    ])
+    .split(area);
+
+    let log_lines: Vec<Line> = app
+        .run_log_lines
+        .iter()
+        .map(|l| Line::raw(l.as_str()))
+        .collect();
+
+    let line_count = log_lines.len() as u16;
+    let inner_height = chunks[0].height.saturating_sub(2);
+    app.run_log_scroll_max = line_count.saturating_sub(inner_height);
+
+    let log_block = Paragraph::new(log_lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Run Log")
+                .border_style(Style::default().fg(Color::Cyan)),
+        )
+        .wrap(Wrap { trim: false })
+        .scroll((app.run_log_scroll, 0));
+    frame.render_widget(log_block, chunks[0]);
+
+    let key_style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+    let bar = Line::from(vec![
+        Span::styled("Esc", key_style),
+        Span::raw(" back  "),
+        Span::styled("j", key_style),
+        Span::raw("/"),
+        Span::styled("k", key_style),
+        Span::raw(" scroll  "),
+        Span::styled("G", key_style),
+        Span::raw(" bottom  "),
+        Span::styled("g", key_style),
+        Span::raw(" top"),
+    ]);
+    frame.render_widget(Paragraph::new(bar), chunks[1]);
 }
 
 fn run_status_style(status: SessionRunStatus) -> Style {

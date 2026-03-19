@@ -42,6 +42,7 @@ pub enum DetailSection {
     Body,
     Threads,
     Output,
+    RunLog,
 }
 
 pub enum View {
@@ -322,6 +323,9 @@ pub struct App<A: LinearApi> {
     pub output_buffer: SessionOutputBuffer,
     pub detail_output_scroll: u16,
     pub detail_output_scroll_max: u16,
+    pub run_log_lines: Vec<String>,
+    pub run_log_scroll: u16,
+    pub run_log_scroll_max: u16,
     pub message_input_active: bool,
     pub message_input: String,
     pub show_help: bool,
@@ -373,6 +377,9 @@ impl<A: LinearApi> App<A> {
             output_buffer: SessionOutputBuffer::new(),
             detail_output_scroll: 0,
             detail_output_scroll_max: 0,
+            run_log_lines: Vec::new(),
+            run_log_scroll: 0,
+            run_log_scroll_max: 0,
             message_input_active: false,
             message_input: String::new(),
             show_help: false,
@@ -639,6 +646,35 @@ impl<A: LinearApi> App<A> {
             self.detail_section = DetailSection::Output;
             self.detail_output_scroll = 0;
         }
+    }
+
+    /// Load a run log file and switch to the RunLog section.
+    pub fn focus_run_log(&mut self, log_path: &str) {
+        match std::fs::read_to_string(log_path) {
+            Ok(content) => {
+                self.run_log_lines = content.lines().map(|l| l.to_string()).collect();
+                self.run_log_scroll = 0;
+                self.run_log_scroll_max = 0;
+                self.detail_section = DetailSection::RunLog;
+            }
+            Err(_) => {
+                self.run_log_lines.clear();
+            }
+        }
+    }
+
+    pub fn scroll_run_log_down(&mut self) {
+        if self.run_log_scroll < self.run_log_scroll_max {
+            self.run_log_scroll = self.run_log_scroll.saturating_add(1);
+        }
+    }
+
+    pub fn scroll_run_log_up(&mut self) {
+        self.run_log_scroll = self.run_log_scroll.saturating_sub(1);
+    }
+
+    pub fn scroll_run_log_to_bottom(&mut self) {
+        self.run_log_scroll = self.run_log_scroll_max;
     }
 
     /// Return output lines for the currently selected thread.
@@ -3315,5 +3351,55 @@ mod tests {
         app.refresh_projects().await;
         assert!(app.flash.is_some());
         assert_eq!(app.flash.as_ref().map(|(m, _)| m.as_str()), Some("Refreshed ✓"));
+    }
+
+    #[test]
+    fn focus_run_log_loads_file_and_switches_section() {
+        let mut app = app_with_issues();
+        app.detail_section = DetailSection::Threads;
+        let dir = std::env::temp_dir().join("ishi-test-run-log");
+        std::fs::create_dir_all(&dir).unwrap();
+        let log_path = dir.join("test.log");
+        std::fs::write(&log_path, "line one\nline two\nline three").unwrap();
+
+        app.focus_run_log(log_path.to_str().unwrap());
+        assert_eq!(app.detail_section, DetailSection::RunLog);
+        assert_eq!(app.run_log_lines.len(), 3);
+        assert_eq!(app.run_log_lines[0], "line one");
+        assert_eq!(app.run_log_scroll, 0);
+
+        std::fs::remove_file(&log_path).ok();
+    }
+
+    #[test]
+    fn focus_run_log_nonexistent_file_does_not_switch() {
+        let mut app = app_with_issues();
+        app.detail_section = DetailSection::Threads;
+        app.focus_run_log("/nonexistent/path/to/log.txt");
+        assert_eq!(app.detail_section, DetailSection::Threads);
+        assert!(app.run_log_lines.is_empty());
+    }
+
+    #[test]
+    fn scroll_run_log_respects_bounds() {
+        let mut app = app_with_issues();
+        app.run_log_scroll_max = 5;
+        app.run_log_scroll = 0;
+
+        app.scroll_run_log_down();
+        assert_eq!(app.run_log_scroll, 1);
+
+        app.scroll_run_log_to_bottom();
+        assert_eq!(app.run_log_scroll, 5);
+
+        app.scroll_run_log_down();
+        assert_eq!(app.run_log_scroll, 5);
+
+        app.scroll_run_log_up();
+        assert_eq!(app.run_log_scroll, 4);
+
+        app.run_log_scroll = 0;
+        app.scroll_run_log_up();
+        assert_eq!(app.run_log_scroll, 0);
     }
 }
