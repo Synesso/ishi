@@ -233,6 +233,25 @@ impl SortColumn {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectSortColumn {
+    Name,
+    Status,
+    Lead,
+    Progress,
+}
+
+impl ProjectSortColumn {
+    pub fn label(&self) -> &'static str {
+        match self {
+            ProjectSortColumn::Name => "Name",
+            ProjectSortColumn::Status => "Status",
+            ProjectSortColumn::Lead => "Lead",
+            ProjectSortColumn::Progress => "Progress",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortDirection {
     Asc,
     Desc,
@@ -319,6 +338,7 @@ pub struct App<A: LinearApi> {
     pub cache: ResponseCache<Vec<Issue>>,
     pub projects: Vec<Project>,
     pub project_selected: usize,
+    pub project_sort: Option<(ProjectSortColumn, SortDirection)>,
     pub project_cache: ResponseCache<Vec<Project>>,
     pub project_issues: Vec<Issue>,
     pub project_issue_selected: usize,
@@ -363,6 +383,7 @@ impl<A: LinearApi> App<A> {
             cache: ResponseCache::new(Duration::from_secs(CACHE_TTL_SECS)),
             projects: Vec::new(),
             project_selected: 0,
+            project_sort: None,
             project_cache: ResponseCache::new(Duration::from_secs(CACHE_TTL_SECS)),
             project_issues: Vec::new(),
             project_issue_selected: 0,
@@ -656,6 +677,36 @@ impl<A: LinearApi> App<A> {
 
     pub fn switch_to_my_issues(&mut self) {
         self.view = View::MyIssues;
+    }
+
+    pub fn sorted_projects(&self) -> Vec<&Project> {
+        let mut projects: Vec<&Project> = self.projects.iter().collect();
+        if let Some((col, dir)) = &self.project_sort {
+            projects.sort_by(|a, b| {
+                let ord = match col {
+                    ProjectSortColumn::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                    ProjectSortColumn::Status => a.status_str().cmp(b.status_str()),
+                    ProjectSortColumn::Lead => a.lead_str().cmp(b.lead_str()),
+                    ProjectSortColumn::Progress => a
+                        .progress
+                        .partial_cmp(&b.progress)
+                        .unwrap_or(Ordering::Equal),
+                };
+                match dir {
+                    SortDirection::Asc => ord,
+                    SortDirection::Desc => ord.reverse(),
+                }
+            });
+        }
+        projects
+    }
+
+    pub fn set_project_sort(&mut self, col: ProjectSortColumn) {
+        self.project_sort = Some(match self.project_sort {
+            Some((c, dir)) if c == col => (col, dir.toggle()),
+            _ => (col, SortDirection::Asc),
+        });
+        self.project_selected = 0;
     }
 
     pub fn project_move_down(&mut self) {

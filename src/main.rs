@@ -589,13 +589,23 @@ async fn main() -> Result<()> {
                 }
             } else if app.awaiting_sort {
                 app.awaiting_sort = false;
-                match key.code {
-                    KeyCode::Char('i') => app.set_sort(app::SortColumn::Identifier),
-                    KeyCode::Char('t') => app.set_sort(app::SortColumn::Title),
-                    KeyCode::Char('p') => app.set_sort(app::SortColumn::Project),
-                    KeyCode::Char('s') => app.set_sort(app::SortColumn::Status),
-                    KeyCode::Char('r') => app.set_sort(app::SortColumn::Priority),
-                    _ => {}
+                if matches!(app.view, app::View::ProjectList) {
+                    match key.code {
+                        KeyCode::Char('n') => app.set_project_sort(app::ProjectSortColumn::Name),
+                        KeyCode::Char('s') => app.set_project_sort(app::ProjectSortColumn::Status),
+                        KeyCode::Char('l') => app.set_project_sort(app::ProjectSortColumn::Lead),
+                        KeyCode::Char('p') => app.set_project_sort(app::ProjectSortColumn::Progress),
+                        _ => {}
+                    }
+                } else {
+                    match key.code {
+                        KeyCode::Char('i') => app.set_sort(app::SortColumn::Identifier),
+                        KeyCode::Char('t') => app.set_sort(app::SortColumn::Title),
+                        KeyCode::Char('p') => app.set_sort(app::SortColumn::Project),
+                        KeyCode::Char('s') => app.set_sort(app::SortColumn::Status),
+                        KeyCode::Char('r') => app.set_sort(app::SortColumn::Priority),
+                        _ => {}
+                    }
                 }
             } else if app.awaiting_filter {
                 app.awaiting_filter = false;
@@ -646,6 +656,7 @@ async fn main() -> Result<()> {
                         keys::Action::Back => app.switch_to_my_issues(),
                         keys::Action::Refresh => app.refresh_projects().await,
                         keys::Action::Help => app.toggle_help(),
+                        keys::Action::OrderBy => app.awaiting_sort = true,
                         keys::Action::OpenIn => {
                             if let Some(url) = app.selected_project_url() {
                                 let _ = std::process::Command::new("open").arg(&url).spawn();
