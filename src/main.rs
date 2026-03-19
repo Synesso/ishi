@@ -346,11 +346,18 @@ async fn main() -> Result<()> {
             && matches!(app.view, app::View::Detail)
         {
             reconcile_tick_counter = 0;
-            if reconcile_session_runs().unwrap_or(0) > 0 {
+            let reconciled = reconcile_session_runs().unwrap_or(0) > 0;
+            let has_active = app.active_run_counts() != (0, 0);
+            // Reload thread data when statuses changed or runs are still active.
+            if reconciled || has_active {
                 if let Some(issue) = app.context_issue() {
                     let id = issue.identifier.clone();
                     load_threads_for_issue(&mut app, &id);
                 }
+            }
+            // Re-read log file content when viewing a run log.
+            if matches!(app.detail_section, app::DetailSection::RunLog) {
+                app.refresh_run_log();
             }
         }
 

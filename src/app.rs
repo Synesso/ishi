@@ -326,6 +326,8 @@ pub struct App<A: LinearApi> {
     pub run_log_lines: Vec<String>,
     pub run_log_scroll: u16,
     pub run_log_scroll_max: u16,
+    /// Path of the currently viewed run log, used for periodic re-reads.
+    pub run_log_path: Option<String>,
     pub message_input_active: bool,
     pub message_input: String,
     pub show_help: bool,
@@ -380,6 +382,7 @@ impl<A: LinearApi> App<A> {
             run_log_lines: Vec::new(),
             run_log_scroll: 0,
             run_log_scroll_max: 0,
+            run_log_path: None,
             message_input_active: false,
             message_input: String::new(),
             show_help: false,
@@ -655,10 +658,31 @@ impl<A: LinearApi> App<A> {
                 self.run_log_lines = content.lines().map(|l| l.to_string()).collect();
                 self.run_log_scroll = 0;
                 self.run_log_scroll_max = 0;
+                self.run_log_path = Some(log_path.to_string());
                 self.detail_section = DetailSection::RunLog;
             }
             Err(_) => {
                 self.run_log_lines.clear();
+                self.run_log_path = None;
+            }
+        }
+    }
+
+    /// Re-read the currently viewed run log file to pick up new content.
+    pub fn refresh_run_log(&mut self) {
+        let Some(path) = self.run_log_path.as_deref() else {
+            return;
+        };
+        let Ok(content) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let new_lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+        if new_lines.len() != self.run_log_lines.len() {
+            let was_at_bottom = self.run_log_scroll >= self.run_log_scroll_max;
+            self.run_log_lines = new_lines;
+            // If the user was scrolled to the bottom, follow the new content.
+            if was_at_bottom {
+                self.run_log_scroll = u16::MAX;
             }
         }
     }
@@ -3378,6 +3402,48 @@ mod tests {
         app.focus_run_log("/nonexistent/path/to/log.txt");
         assert_eq!(app.detail_section, DetailSection::Threads);
         assert!(app.run_log_lines.is_empty());
+        assert!(app.run_log_path.is_none());
+    }
+
+    #[test]
+    fn refresh_run_log_picks_up_new_content() {
+        let mut app = app_with_issues();
+        let dir = std::env::temp_dir().join("ishi-test-refresh-log");
+        std::fs::create_dir_all(&dir).unwrap();
+        let log_path = dir.join("refresh.log");
+        std::fs::write(&log_path, "line one").unwrap();
+
+        app.focus_run_log(log_path.to_str().unwrap());
+        assert_eq!(app.run_log_lines.len(), 1);
+
+        // Simulate new content being appended.
+        std::fs::write(&log_path, "line one\nline two\nline three").unwrap();
+        app.refresh_run_log();
+        assert_eq!(app.run_log_lines.len(), 3);
+        assert_eq!(app.run_log_lines[2], "line three");
+
+        std::fs::remove_file(&log_path).ok();
+    }
+
+    #[test]
+    fn refresh_run_log_follows_bottom() {
+        let mut app = app_with_issues();
+        let dir = std::env::temp_dir().join("ishi-test-follow-log");
+        std::fs::create_dir_all(&dir).unwrap();
+        let log_path = dir.join("follow.log");
+        std::fs::write(&log_path, "a").unwrap();
+
+        app.focus_run_log(log_path.to_str().unwrap());
+        // Scroll is at 0, max is 0 → at bottom.
+        assert_eq!(app.run_log_scroll, 0);
+        assert_eq!(app.run_log_scroll_max, 0);
+
+        std::fs::write(&log_path, "a\nb\nc").unwrap();
+        app.refresh_run_log();
+        // Should auto-scroll to follow new content.
+        assert_eq!(app.run_log_scroll, u16::MAX);
+
+        std::fs::remove_file(&log_path).ok();
     }
 
     #[test]
