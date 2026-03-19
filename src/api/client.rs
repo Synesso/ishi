@@ -20,13 +20,15 @@ query($issueId: String!) {
 "#;
 
 const MY_ISSUES_QUERY: &str = r#"
-query {
+query($after: String) {
   viewer {
     assignedIssues(
       first: 50
+      after: $after
       filter: { state: { type: { nin: ["completed", "canceled"] } } }
       orderBy: updatedAt
     ) {
+      pageInfo { hasNextPage endCursor }
       nodes {
         id
         identifier
@@ -99,13 +101,15 @@ mutation($issueId: String!, $stateId: String!) {
 "#;
 
 const PROJECT_ISSUES_QUERY: &str = r#"
-query($projectId: String!) {
+query($projectId: String!, $after: String) {
   project(id: $projectId) {
     issues(
       first: 50
+      after: $after
       filter: { state: { type: { nin: ["completed", "canceled"] } } }
       orderBy: updatedAt
     ) {
+      pageInfo { hasNextPage endCursor }
       nodes {
         id
         identifier
@@ -189,10 +193,21 @@ impl LinearApi for LinearClient {
     }
 
     async fn fetch_my_issues(&self) -> Result<Vec<Issue>> {
-        let resp = self.query(MY_ISSUES_QUERY, None).await?;
-        let issues: Vec<Issue> =
-            serde_json::from_value(resp["data"]["viewer"]["assignedIssues"]["nodes"].clone())?;
-        Ok(issues)
+        let mut all_issues: Vec<Issue> = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let vars = serde_json::json!({ "after": cursor });
+            let resp = self.query(MY_ISSUES_QUERY, Some(vars)).await?;
+            let connection = &resp["data"]["viewer"]["assignedIssues"];
+            let issues: Vec<Issue> = serde_json::from_value(connection["nodes"].clone())?;
+            all_issues.extend(issues);
+            let has_next = connection["pageInfo"]["hasNextPage"].as_bool().unwrap_or(false);
+            if !has_next {
+                break;
+            }
+            cursor = connection["pageInfo"]["endCursor"].as_str().map(String::from);
+        }
+        Ok(all_issues)
     }
 
     async fn fetch_pull_request_url(&self, issue_id: &str) -> Result<Option<String>> {
@@ -233,11 +248,21 @@ impl LinearApi for LinearClient {
     }
 
     async fn fetch_project_issues(&self, project_id: &str) -> Result<Vec<Issue>> {
-        let vars = serde_json::json!({ "projectId": project_id });
-        let resp = self.query(PROJECT_ISSUES_QUERY, Some(vars)).await?;
-        let issues: Vec<Issue> =
-            serde_json::from_value(resp["data"]["project"]["issues"]["nodes"].clone())?;
-        Ok(issues)
+        let mut all_issues: Vec<Issue> = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let vars = serde_json::json!({ "projectId": project_id, "after": cursor });
+            let resp = self.query(PROJECT_ISSUES_QUERY, Some(vars)).await?;
+            let connection = &resp["data"]["project"]["issues"];
+            let issues: Vec<Issue> = serde_json::from_value(connection["nodes"].clone())?;
+            all_issues.extend(issues);
+            let has_next = connection["pageInfo"]["hasNextPage"].as_bool().unwrap_or(false);
+            if !has_next {
+                break;
+            }
+            cursor = connection["pageInfo"]["endCursor"].as_str().map(String::from);
+        }
+        Ok(all_issues)
     }
 
     async fn update_issue_state(&self, issue_id: &str, state_name: &str) -> Result<String> {

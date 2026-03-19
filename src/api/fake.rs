@@ -53,13 +53,22 @@ impl LinearApi for FakeLinearApi {
     }
 
     async fn fetch_my_issues(&self) -> Result<Vec<Issue>> {
-        let resp = self.query("", None).await?;
-        let nodes = &resp["data"]["issues"]["nodes"];
-        if nodes.is_null() {
-            return Ok(vec![]);
+        let mut all_issues: Vec<Issue> = Vec::new();
+        loop {
+            let resp = self.query("", None).await?;
+            let connection = &resp["data"]["issues"];
+            let nodes = &connection["nodes"];
+            if nodes.is_null() {
+                break;
+            }
+            let issues: Vec<Issue> = serde_json::from_value(nodes.clone())?;
+            all_issues.extend(issues);
+            let has_next = connection["pageInfo"]["hasNextPage"].as_bool().unwrap_or(false);
+            if !has_next {
+                break;
+            }
         }
-        let issues: Vec<Issue> = serde_json::from_value(nodes.clone())?;
-        Ok(issues)
+        Ok(all_issues)
     }
 
     async fn fetch_pull_request_url(&self, _issue_id: &str) -> Result<Option<String>> {
@@ -77,13 +86,22 @@ impl LinearApi for FakeLinearApi {
     }
 
     async fn fetch_project_issues(&self, _project_id: &str) -> Result<Vec<Issue>> {
-        let resp = self.query("", None).await?;
-        let nodes = &resp["data"]["project"]["issues"]["nodes"];
-        if nodes.is_null() {
-            return Ok(vec![]);
+        let mut all_issues: Vec<Issue> = Vec::new();
+        loop {
+            let resp = self.query("", None).await?;
+            let connection = &resp["data"]["project"]["issues"];
+            let nodes = &connection["nodes"];
+            if nodes.is_null() {
+                break;
+            }
+            let issues: Vec<Issue> = serde_json::from_value(nodes.clone())?;
+            all_issues.extend(issues);
+            let has_next = connection["pageInfo"]["hasNextPage"].as_bool().unwrap_or(false);
+            if !has_next {
+                break;
+            }
         }
-        let issues: Vec<Issue> = serde_json::from_value(nodes.clone())?;
-        Ok(issues)
+        Ok(all_issues)
     }
 
     async fn update_issue_state(&self, _issue_id: &str, state_name: &str) -> Result<String> {
@@ -191,6 +209,50 @@ mod tests {
         let fake = FakeLinearApi::new();
         let issues = fake.fetch_project_issues("proj-1").await.unwrap();
         assert!(issues.is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetch_my_issues_paginates_across_pages() {
+        let fake = FakeLinearApi::new();
+        fake.push_response(serde_json::json!({
+            "data": { "issues": {
+                "pageInfo": { "hasNextPage": true, "endCursor": "cursor-1" },
+                "nodes": [{ "id": "i1", "identifier": "JEM-1", "title": "First" }]
+            }}
+        }));
+        fake.push_response(serde_json::json!({
+            "data": { "issues": {
+                "pageInfo": { "hasNextPage": false, "endCursor": null },
+                "nodes": [{ "id": "i2", "identifier": "JEM-2", "title": "Second" }]
+            }}
+        }));
+
+        let issues = fake.fetch_my_issues().await.unwrap();
+        assert_eq!(issues.len(), 2);
+        assert_eq!(issues[0].identifier, "JEM-1");
+        assert_eq!(issues[1].identifier, "JEM-2");
+    }
+
+    #[tokio::test]
+    async fn fetch_project_issues_paginates_across_pages() {
+        let fake = FakeLinearApi::new();
+        fake.push_response(serde_json::json!({
+            "data": { "project": { "issues": {
+                "pageInfo": { "hasNextPage": true, "endCursor": "cursor-1" },
+                "nodes": [{ "id": "i10", "identifier": "JEM-10", "title": "First" }]
+            }}}
+        }));
+        fake.push_response(serde_json::json!({
+            "data": { "project": { "issues": {
+                "pageInfo": { "hasNextPage": false, "endCursor": null },
+                "nodes": [{ "id": "i11", "identifier": "JEM-11", "title": "Second" }]
+            }}}
+        }));
+
+        let issues = fake.fetch_project_issues("proj-1").await.unwrap();
+        assert_eq!(issues.len(), 2);
+        assert_eq!(issues[0].identifier, "JEM-10");
+        assert_eq!(issues[1].identifier, "JEM-11");
     }
 
     #[tokio::test]

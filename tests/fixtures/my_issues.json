@@ -1,6 +1,7 @@
 {
   "data": {
     "issues": {
+      "pageInfo": { "hasNextPage": false, "endCursor": null },
       "nodes": [
         {
           "id": "issue-1",

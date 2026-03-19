@@ -2,6 +2,7 @@
   "data": {
     "project": {
       "issues": {
+        "pageInfo": { "hasNextPage": false, "endCursor": null },
         "nodes": [
           {
             "id": "issue-10",
