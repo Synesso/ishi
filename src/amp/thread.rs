@@ -59,8 +59,14 @@ pub fn format_relative_time(now_ms: u64, then_ms: u64) -> String {
 }
 
 /// Returns the default directory where Amp stores thread files.
+///
+/// Amp follows XDG conventions (`~/.local/share/amp/threads`), so we check
+/// `$XDG_DATA_HOME` first, falling back to `~/.local/share`.
 pub fn amp_threads_dir() -> Option<PathBuf> {
-    dirs::data_dir().map(|d| d.join("amp").join("threads"))
+    let data_dir = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|h| h.join(".local").join("share")))?;
+    Some(data_dir.join("amp").join("threads"))
 }
 
 /// Read a thread file and produce a summary.

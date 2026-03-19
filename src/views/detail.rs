@@ -73,7 +73,8 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
         // header border (1) + each thread line (1 each) + bottom border (1)
         (thread_count as u16) + 2
     } else {
-        0
+        // Empty state: border (2) + hint line (1)
+        3
     };
 
     // Output section: show when viewing output, or when there's output for the selected thread
@@ -231,8 +232,8 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
         frame.render_widget(Paragraph::new(input_line), chunks[3]);
     }
 
-    // Threads section
-    if thread_count > 0 {
+    // Threads section (always shown)
+    {
         let threads_focused = app.detail_section == DetailSection::Threads;
         let threads_border_style = if threads_focused {
             Style::default().fg(Color::Cyan)
@@ -240,39 +241,45 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
             Style::default().fg(Color::DarkGray)
         };
 
-        let thread_lines: Vec<Line> = app
-            .detail_threads
-            .iter()
-            .enumerate()
-            .map(|(i, t)| {
-                let is_selected = threads_focused && i == app.detail_thread_selected;
-                let style = if is_selected {
-                    Style::default().add_modifier(Modifier::REVERSED)
-                } else {
-                    Style::default()
-                };
-                let time_str = t.relative_time();
-                let mut spans = vec![
-                    Span::styled(format!("  {} ", t.title), style),
-                    Span::styled(
-                        format!("({} msgs) ", t.message_count),
-                        style.fg(Color::DarkGray),
-                    ),
-                    Span::styled(time_str, style.fg(Color::DarkGray)),
-                ];
-                if let Some(status) = app.run_status_for_thread(&t.id) {
-                    spans.push(Span::raw(" "));
-                    spans.push(Span::styled(
-                        format!("[{}]", status.label()),
-                        run_status_style(status),
-                    ));
-                }
-                Line::from(spans)
-            })
-            .collect();
+        let thread_lines: Vec<Line> = if thread_count > 0 {
+            app.detail_threads
+                .iter()
+                .enumerate()
+                .map(|(i, t)| {
+                    let is_selected = threads_focused && i == app.detail_thread_selected;
+                    let style = if is_selected {
+                        Style::default().add_modifier(Modifier::REVERSED)
+                    } else {
+                        Style::default()
+                    };
+                    let time_str = t.relative_time();
+                    let mut spans = vec![
+                        Span::styled(format!("  {} ", t.title), style),
+                        Span::styled(
+                            format!("({} msgs) ", t.message_count),
+                            style.fg(Color::DarkGray),
+                        ),
+                        Span::styled(time_str, style.fg(Color::DarkGray)),
+                    ];
+                    if let Some(status) = app.run_status_for_thread(&t.id) {
+                        spans.push(Span::raw(" "));
+                        spans.push(Span::styled(
+                            format!("[{}]", status.label()),
+                            run_status_style(status),
+                        ));
+                    }
+                    Line::from(spans)
+                })
+                .collect()
+        } else {
+            vec![Line::from(Span::styled(
+                "  No threads yet — press a to start one",
+                Style::default().fg(Color::DarkGray),
+            ))]
+        };
 
         let (running, pending) = app.active_run_counts();
-        let threads_title = if running > 0 || pending > 0 {
+        let threads_title = if thread_count > 0 && (running > 0 || pending > 0) {
             let mut parts = vec![format!("Threads ({})", thread_count)];
             if running > 0 {
                 parts.push(format!("{} running", running));

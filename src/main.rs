@@ -443,6 +443,7 @@ async fn main() -> Result<()> {
                                 app.workspace_picker = None;
                                 match edit_prompt(&context) {
                                     Ok(Some(prompt)) => {
+                                        app.flash = Some(("Starting thread …".into(), 30));
                                         let tx = bg_tx.clone();
                                         let issue_id_signal = issue_id.clone();
                                         tokio::task::spawn_blocking(move || {
@@ -520,6 +521,7 @@ async fn main() -> Result<()> {
                                 let workspace = workspace.clone();
                                 match edit_prompt(&context) {
                                     Ok(Some(prompt)) => {
+                                        app.flash = Some(("Starting thread …".into(), 30));
                                         let tx = bg_tx.clone();
                                         let issue_id_signal = issue_id.clone();
                                         tokio::task::spawn_blocking(move || {
