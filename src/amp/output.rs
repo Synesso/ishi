@@ -22,6 +22,8 @@ pub enum OutputKind {
     ResultError,
     /// System / init events.
     System,
+    /// User-sent instruction message.
+    User,
 }
 
 /// Buffers parsed output lines per thread for display in the TUI.
@@ -64,6 +66,23 @@ impl SessionOutputBuffer {
     /// Clear buffered output for a thread.
     pub fn clear_thread(&mut self, thread_id: &str) {
         self.buffers.remove(thread_id);
+    }
+
+    /// Append a user-sent message to the buffer for display.
+    pub fn push_user_message(&mut self, thread_id: &str, text: &str) {
+        let lines: Vec<OutputLine> = text
+            .lines()
+            .map(|line| OutputLine {
+                kind: OutputKind::User,
+                text: format!("▶ {line}"),
+            })
+            .collect();
+        if !lines.is_empty() {
+            self.buffers
+                .entry(thread_id.to_string())
+                .or_default()
+                .extend(lines);
+        }
     }
 }
 
@@ -266,5 +285,30 @@ mod tests {
         let event = make_event(r#"{"type":"system"}"#);
         let lines = parse_event(&event);
         assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn push_user_message_adds_prefixed_lines() {
+        let mut buf = SessionOutputBuffer::new();
+        buf.push_user_message("T-1", "do the thing");
+        assert_eq!(buf.line_count("T-1"), 1);
+        assert_eq!(buf.lines_for("T-1")[0].kind, OutputKind::User);
+        assert_eq!(buf.lines_for("T-1")[0].text, "▶ do the thing");
+    }
+
+    #[test]
+    fn push_user_message_splits_multiline() {
+        let mut buf = SessionOutputBuffer::new();
+        buf.push_user_message("T-1", "line one\nline two");
+        assert_eq!(buf.line_count("T-1"), 2);
+        assert_eq!(buf.lines_for("T-1")[0].text, "▶ line one");
+        assert_eq!(buf.lines_for("T-1")[1].text, "▶ line two");
+    }
+
+    #[test]
+    fn push_user_message_empty_is_noop() {
+        let mut buf = SessionOutputBuffer::new();
+        buf.push_user_message("T-1", "");
+        assert_eq!(buf.line_count("T-1"), 0);
     }
 }

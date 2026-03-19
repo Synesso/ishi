@@ -339,6 +339,8 @@ pub struct App<A: LinearApi> {
     pub output_buffer: SessionOutputBuffer,
     pub detail_output_scroll: u16,
     pub detail_output_scroll_max: u16,
+    pub message_input_active: bool,
+    pub message_input: String,
     pub show_help: bool,
     pub cache: ResponseCache<Vec<Issue>>,
     pub projects: Vec<Project>,
@@ -387,6 +389,8 @@ impl<A: LinearApi> App<A> {
             output_buffer: SessionOutputBuffer::new(),
             detail_output_scroll: 0,
             detail_output_scroll_max: 0,
+            message_input_active: false,
+            message_input: String::new(),
             show_help: false,
             cache: ResponseCache::new(Duration::from_secs(CACHE_TTL_SECS)),
             projects: Vec::new(),
@@ -554,6 +558,8 @@ impl<A: LinearApi> App<A> {
         self.detail_session_runs.clear();
         self.detail_output_scroll = 0;
         self.detail_output_scroll_max = 0;
+        self.message_input_active = false;
+        self.message_input.clear();
     }
 
     pub fn selected_issue(&self) -> Option<&Issue> {
@@ -676,6 +682,41 @@ impl<A: LinearApi> App<A> {
     /// Auto-scroll the output view to the bottom.
     pub fn scroll_output_to_bottom(&mut self) {
         self.detail_output_scroll = self.detail_output_scroll_max;
+    }
+
+    /// Activate the message input bar in the output section.
+    pub fn start_message_input(&mut self) {
+        self.message_input_active = true;
+        self.message_input.clear();
+    }
+
+    /// Cancel message input without sending.
+    pub fn cancel_message_input(&mut self) {
+        self.message_input_active = false;
+        self.message_input.clear();
+    }
+
+    /// Submit the current message input.
+    ///
+    /// Adds the message to the output buffer as a user message and returns
+    /// the (thread_id, message_text) pair for the caller to forward to the
+    /// session. Returns `None` if the input is empty or no thread is selected.
+    pub fn submit_message_input(&mut self) -> Option<(String, String)> {
+        self.message_input_active = false;
+        let text = self.message_input.trim().to_string();
+        if text.is_empty() {
+            self.message_input.clear();
+            return None;
+        }
+
+        let thread_id = self
+            .detail_threads
+            .get(self.detail_thread_selected)
+            .map(|t| t.id.clone())?;
+
+        self.output_buffer.push_user_message(&thread_id, &text);
+        self.message_input.clear();
+        Some((thread_id, text))
     }
 
     pub fn show_workspace_picker(&mut self, workspaces: Vec<String>) {
@@ -3206,5 +3247,66 @@ mod tests {
         app.back_to_list();
         assert_eq!(app.detail_output_scroll, 0);
         assert_eq!(app.detail_output_scroll_max, 0);
+    }
+
+    #[test]
+    fn start_message_input_activates_and_clears() {
+        let mut app = app_with_thread_and_output();
+        app.message_input = "leftover".to_string();
+        app.start_message_input();
+        assert!(app.message_input_active);
+        assert!(app.message_input.is_empty());
+    }
+
+    #[test]
+    fn cancel_message_input_deactivates() {
+        let mut app = app_with_thread_and_output();
+        app.start_message_input();
+        app.message_input.push_str("draft");
+        app.cancel_message_input();
+        assert!(!app.message_input_active);
+        assert!(app.message_input.is_empty());
+    }
+
+    #[test]
+    fn submit_message_input_returns_thread_and_text() {
+        let mut app = app_with_thread_and_output();
+        app.start_message_input();
+        app.message_input = "do the thing".to_string();
+        let result = app.submit_message_input();
+        assert!(!app.message_input_active);
+        assert!(app.message_input.is_empty());
+        let (thread_id, text) = result.unwrap();
+        assert_eq!(thread_id, "T-abc");
+        assert_eq!(text, "do the thing");
+        // Should also appear in output buffer
+        assert_eq!(app.output_buffer.line_count("T-abc"), 2); // 1 assistant + 1 user
+    }
+
+    #[test]
+    fn submit_message_input_empty_returns_none() {
+        let mut app = app_with_thread_and_output();
+        app.start_message_input();
+        let result = app.submit_message_input();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn submit_message_input_whitespace_only_returns_none() {
+        let mut app = app_with_thread_and_output();
+        app.start_message_input();
+        app.message_input = "   ".to_string();
+        let result = app.submit_message_input();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn submit_message_input_no_thread_returns_none() {
+        let mut app = app_with_issues();
+        app.detail_threads.clear();
+        app.start_message_input();
+        app.message_input = "hello".to_string();
+        let result = app.submit_message_input();
+        assert!(result.is_none());
     }
 }

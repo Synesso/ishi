@@ -380,6 +380,24 @@ async fn main() -> Result<()> {
                     KeyCode::Char('q') => app.running = false,
                     _ => {}
                 }
+            } else if app.message_input_active {
+                match key.code {
+                    KeyCode::Enter => {
+                        if let Some((_thread_id, _text)) = app.submit_message_input() {
+                            // TODO: forward to SessionManager::send_message
+                            // once SessionManager is wired into the main loop.
+                            app.scroll_output_to_bottom();
+                        }
+                    }
+                    KeyCode::Esc => app.cancel_message_input(),
+                    KeyCode::Backspace => {
+                        app.message_input.pop();
+                    }
+                    KeyCode::Char(c) => {
+                        app.message_input.push(c);
+                    }
+                    _ => {}
+                }
             } else if app.workspace_picker.is_some() {
                 let is_typing = app.workspace_picker.as_ref().is_some_and(|p| p.typing);
                 if is_typing {
@@ -707,6 +725,7 @@ async fn main() -> Result<()> {
                             keys::Action::MoveUp => app.scroll_output_up(),
                             keys::Action::Top => app.detail_output_scroll = 0,
                             keys::Action::Bottom => app.scroll_output_to_bottom(),
+                            keys::Action::SendInstruction => app.start_message_input(),
                             keys::Action::Help => app.toggle_help(),
                             _ => {}
                         },

@@ -21,6 +21,7 @@ pub enum Action {
     MarkRunStale,
     Projects,
     ChangeState,
+    SendInstruction,
 }
 
 pub fn map_key(key: KeyEvent) -> Option<Action> {
@@ -46,6 +47,7 @@ pub fn map_key(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Char('x')) => Some(Action::MarkRunStale),
         (_, KeyCode::Char('p')) => Some(Action::Projects),
         (_, KeyCode::Char('m')) => Some(Action::ChangeState),
+        (_, KeyCode::Char('i')) => Some(Action::SendInstruction),
         _ => None,
     }
 }
@@ -194,6 +196,14 @@ mod tests {
         assert!(matches!(
             map_key(key(KeyCode::Char('m'))),
             Some(Action::ChangeState)
+        ));
+    }
+
+    #[test]
+    fn send_instruction_on_i() {
+        assert!(matches!(
+            map_key(key(KeyCode::Char('i'))),
+            Some(Action::SendInstruction)
         ));
     }
 
