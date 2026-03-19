@@ -19,6 +19,12 @@ use std::io::stdout;
 use std::path::Path;
 use tokio::sync::mpsc;
 
+/// Messages sent from background tasks back to the main loop.
+enum BgMessage {
+    Error(String),
+    ThreadCreated { issue_identifier: String },
+}
+
 enum RunManagementAction {
     OpenLog {
         log_path: String,
@@ -315,8 +321,12 @@ async fn main() -> Result<()> {
         )));
     }
 
-    // Channel for background tasks to report errors back to the UI.
-    let (bg_error_tx, mut bg_error_rx) = mpsc::unbounded_channel::<String>();
+    // Channel for background tasks to report messages back to the UI.
+    let (bg_tx, mut bg_rx) = mpsc::unbounded_channel::<BgMessage>();
+
+    // Periodic reconciliation: reload thread/run state every ~3 seconds.
+    const RECONCILE_INTERVAL_TICKS: u32 = 30; // 30 × 100ms poll = 3s
+    let mut reconcile_tick_counter: u32 = 0;
 
     // Terminal setup
     enable_raw_mode()?;
@@ -325,10 +335,39 @@ async fn main() -> Result<()> {
 
     // Main loop
     while app.running {
-        // Check for errors from background tasks.
-        while let Ok(msg) = bg_error_rx.try_recv() {
-            app.error = Some(app::AppError::new(msg));
+        // Check for messages from background tasks.
+        while let Ok(msg) = bg_rx.try_recv() {
+            match msg {
+                BgMessage::Error(err) => {
+                    app.error = Some(app::AppError::new(err));
+                }
+                BgMessage::ThreadCreated { issue_identifier } => {
+                    app.flash = Some(("Thread started ✓".into(), 30));
+                    // Reload threads if we're viewing the same issue.
+                    if app
+                        .context_issue()
+                        .is_some_and(|i| i.identifier == issue_identifier)
+                    {
+                        load_threads_for_issue(&mut app, &issue_identifier);
+                    }
+                }
+            }
         }
+
+        // Periodic reconciliation of background run statuses.
+        reconcile_tick_counter += 1;
+        if reconcile_tick_counter >= RECONCILE_INTERVAL_TICKS
+            && matches!(app.view, app::View::Detail)
+        {
+            reconcile_tick_counter = 0;
+            if reconcile_session_runs().unwrap_or(0) > 0 {
+                if let Some(issue) = app.context_issue() {
+                    let id = issue.identifier.clone();
+                    load_threads_for_issue(&mut app, &id);
+                }
+            }
+        }
+
         app.tick_flash();
         terminal.draw(|frame| {
             let area = frame.area();
@@ -404,14 +443,21 @@ async fn main() -> Result<()> {
                                 app.workspace_picker = None;
                                 match edit_prompt(&context) {
                                     Ok(Some(prompt)) => {
-                                        let tx = bg_error_tx.clone();
+                                        let tx = bg_tx.clone();
+                                        let issue_id_signal = issue_id.clone();
                                         tokio::task::spawn_blocking(move || {
-                                            if let Err(err) =
-                                                start_new_thread(&issue_id, &workspace, &prompt)
+                                            match start_new_thread(&issue_id, &workspace, &prompt)
                                             {
-                                                let _ = tx.send(format!(
-                                                    "Failed to start thread: {err}"
-                                                ));
+                                                Ok(()) => {
+                                                    let _ = tx.send(BgMessage::ThreadCreated {
+                                                        issue_identifier: issue_id_signal,
+                                                    });
+                                                }
+                                                Err(err) => {
+                                                    let _ = tx.send(BgMessage::Error(format!(
+                                                        "Failed to start thread: {err}"
+                                                    )));
+                                                }
                                             }
                                         });
                                         terminal.clear()?;
@@ -474,14 +520,21 @@ async fn main() -> Result<()> {
                                 let workspace = workspace.clone();
                                 match edit_prompt(&context) {
                                     Ok(Some(prompt)) => {
-                                        let tx = bg_error_tx.clone();
+                                        let tx = bg_tx.clone();
+                                        let issue_id_signal = issue_id.clone();
                                         tokio::task::spawn_blocking(move || {
-                                            if let Err(err) =
-                                                start_new_thread(&issue_id, &workspace, &prompt)
+                                            match start_new_thread(&issue_id, &workspace, &prompt)
                                             {
-                                                let _ = tx.send(format!(
-                                                    "Failed to start thread: {err}"
-                                                ));
+                                                Ok(()) => {
+                                                    let _ = tx.send(BgMessage::ThreadCreated {
+                                                        issue_identifier: issue_id_signal,
+                                                    });
+                                                }
+                                                Err(err) => {
+                                                    let _ = tx.send(BgMessage::Error(format!(
+                                                        "Failed to start thread: {err}"
+                                                    )));
+                                                }
                                             }
                                         });
                                         terminal.clear()?;
@@ -552,15 +605,15 @@ async fn main() -> Result<()> {
                             app.apply_local_state_change(&state_name);
                             // Fire-and-forget: spawn the API call in the background.
                             let api = app.api.clone();
-                            let tx = bg_error_tx.clone();
+                            let tx = bg_tx.clone();
                             tokio::spawn(async move {
                                 if let Err(err) =
                                     api.update_issue_state(&issue_id, &state_name).await
                                 {
-                                    let _ = tx.send(format!(
+                                    let _ = tx.send(BgMessage::Error(format!(
                                         "Failed to update state for {}: {}",
                                         identifier, err
-                                    ));
+                                    )));
                                 }
                             });
                         }
