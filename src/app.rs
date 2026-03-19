@@ -747,7 +747,12 @@ impl<A: LinearApi> App<A> {
 
     pub fn start_state_change(&mut self) {
         const STATES: &[&str] = &[
-            "Backlog", "Todo", "In Progress", "In Review", "Done", "Canceled",
+            "Backlog",
+            "Todo",
+            "In Progress",
+            "In Review",
+            "Done",
+            "Canceled",
         ];
         self.state_options = STATES.iter().map(|s| s.to_string()).collect();
         let current = self.context_issue().map(|i| i.status_str().to_string());
@@ -776,7 +781,9 @@ impl<A: LinearApi> App<A> {
     }
 
     pub fn selected_state_option(&self) -> Option<&str> {
-        self.state_options.get(self.state_selected).map(|s| s.as_str())
+        self.state_options
+            .get(self.state_selected)
+            .map(|s| s.as_str())
     }
 
     /// Apply a state change to the currently selected issue in local data.

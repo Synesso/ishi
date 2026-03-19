@@ -29,7 +29,8 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         return;
     }
 
-    let show_bar = app.refreshing || app.awaiting_quit || app.awaiting_state_change || app.error.is_some();
+    let show_bar =
+        app.refreshing || app.awaiting_quit || app.awaiting_state_change || app.error.is_some();
     let chunks = if show_bar {
         Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area)
     } else {

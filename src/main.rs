@@ -556,16 +556,22 @@ async fn main() -> Result<()> {
                 match key.code {
                     KeyCode::Enter => {
                         let state_name = app.selected_state_option().map(|s| s.to_string());
-                        let issue = app.context_issue().map(|i| (i.id.clone(), i.identifier.clone()));
+                        let issue = app
+                            .context_issue()
+                            .map(|i| (i.id.clone(), i.identifier.clone()));
                         app.cancel_state_change();
-                        if let (Some(state_name), Some((issue_id, identifier))) = (state_name, issue) {
+                        if let (Some(state_name), Some((issue_id, identifier))) =
+                            (state_name, issue)
+                        {
                             // Optimistic update: apply locally first for instant feedback.
                             app.apply_local_state_change(&state_name);
                             // Fire-and-forget: spawn the API call in the background.
                             let api = app.api.clone();
                             let tx = bg_error_tx.clone();
                             tokio::spawn(async move {
-                                if let Err(err) = api.update_issue_state(&issue_id, &state_name).await {
+                                if let Err(err) =
+                                    api.update_issue_state(&issue_id, &state_name).await
+                                {
                                     let _ = tx.send(format!(
                                         "Failed to update state for {}: {}",
                                         identifier, err
@@ -575,7 +581,9 @@ async fn main() -> Result<()> {
                         }
                     }
                     KeyCode::Esc => app.cancel_state_change(),
-                    KeyCode::Char('j') | KeyCode::Down | KeyCode::Right => app.state_change_move_down(),
+                    KeyCode::Char('j') | KeyCode::Down | KeyCode::Right => {
+                        app.state_change_move_down()
+                    }
                     KeyCode::Char('k') | KeyCode::Up | KeyCode::Left => app.state_change_move_up(),
                     _ => {}
                 }
