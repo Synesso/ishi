@@ -20,7 +20,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         return;
     }
 
-    let show_bar = app.refreshing || app.awaiting_quit || app.error.is_some();
+    let show_bar = app.refreshing || app.awaiting_quit || app.awaiting_sort || app.error.is_some();
     let chunks = if show_bar {
         Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area)
     } else {
@@ -34,8 +34,9 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         Cell::from("Progress").style(Style::default().add_modifier(Modifier::BOLD)),
     ]);
 
-    let rows: Vec<Row> = app
-        .projects
+    let projects = app.sorted_projects();
+
+    let rows: Vec<Row> = projects
         .iter()
         .map(|project| {
             Row::new(vec![
@@ -53,7 +54,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         })
         .collect();
 
-    let title = format!("Projects ({})", app.projects.len());
+    let title = format!("Projects ({})", projects.len());
 
     let table = Table::new(
         rows,
@@ -93,6 +94,19 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
                 ),
             ]);
             frame.render_widget(Paragraph::new(line), chunks[1]);
+        } else if app.awaiting_sort {
+            let sort_hints = vec![
+                Span::raw("sort by: "),
+                Span::styled("n", key_style),
+                Span::raw("ame  "),
+                Span::styled("s", key_style),
+                Span::raw("tatus  "),
+                Span::styled("l", key_style),
+                Span::raw("ead  "),
+                Span::styled("p", key_style),
+                Span::raw("rogress"),
+            ];
+            frame.render_widget(Paragraph::new(Line::from(sort_hints)), chunks[1]);
         } else if app.refreshing {
             let line = Line::from(Span::styled(
                 "Refreshing...",
