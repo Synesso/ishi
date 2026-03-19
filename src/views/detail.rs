@@ -321,14 +321,6 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
             Span::styled("g", key_style),
             Span::raw("ithub PR"),
         ])
-    } else if app.awaiting_thread_run_mode {
-        Line::from(vec![
-            Span::raw("run thread: "),
-            Span::styled("f", key_style),
-            Span::raw("oreground  "),
-            Span::styled("b", key_style),
-            Span::raw("ackground"),
-        ])
     } else if app.message_input_active {
         Line::from(vec![
             Span::styled("Enter", key_style),
@@ -359,14 +351,10 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
             spans.push(Span::styled("k", key_style));
             spans.push(Span::raw(" navigate"));
         }
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled("Enter", key_style));
-        spans.push(Span::raw(" choose run mode  "));
         if app.selected_thread_run().is_some() {
+            spans.push(Span::raw("  "));
             spans.push(Span::styled("l", key_style));
             spans.push(Span::raw(" log  "));
-            spans.push(Span::styled("R", key_style));
-            spans.push(Span::raw(" retry  "));
             spans.push(Span::styled("x", key_style));
             spans.push(Span::raw(" stale  "));
         }

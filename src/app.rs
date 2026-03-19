@@ -318,7 +318,6 @@ pub struct App<A: LinearApi> {
     pub awaiting_filter: bool,
     pub awaiting_sort: bool,
     pub awaiting_open: bool,
-    pub awaiting_thread_run_mode: bool,
     pub awaiting_state_change: bool,
     pub state_options: Vec<String>,
     pub state_selected: usize,
@@ -368,7 +367,6 @@ impl<A: LinearApi> App<A> {
             awaiting_filter: false,
             awaiting_sort: false,
             awaiting_open: false,
-            awaiting_thread_run_mode: false,
             awaiting_state_change: false,
             state_options: Vec::new(),
             state_selected: 0,
@@ -2410,12 +2408,6 @@ mod tests {
     fn awaiting_open_defaults_to_false() {
         let app = app_with_issues();
         assert!(!app.awaiting_open);
-    }
-
-    #[test]
-    fn awaiting_thread_run_mode_defaults_to_false() {
-        let app = app_with_issues();
-        assert!(!app.awaiting_thread_run_mode);
     }
 
     #[test]

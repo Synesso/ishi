@@ -7,83 +7,6 @@ use std::io::stdout;
 use std::path::Path;
 use std::process::{Command, ExitStatus};
 
-/// Suspend the TUI, optionally open `$EDITOR` with pre-filled context for the
-/// user to edit, then launch `amp` (piping the edited text if any).
-///
-/// The editor and amp both run outside the alternate screen so they get full
-/// terminal access. The TUI is restored afterwards.
-pub fn run_with_editor_then_command(
-    working_dir: &Path,
-    initial_context: Option<&str>,
-) -> Result<ExitStatus> {
-    // Leave TUI
-    execute!(stdout(), LeaveAlternateScreen)?;
-    disable_raw_mode()?;
-
-    // If there's issue context, let the user edit it first.
-    let edited = initial_context.and_then(|ctx| edit_text_raw(ctx).ok().flatten());
-
-    // Launch amp — pipe edited context or run interactively.
-    let status = if let Some(msg) = &edited {
-        use std::io::Write;
-        let mut child = Command::new("amp")
-            .current_dir(working_dir)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::inherit())
-            .spawn()?;
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(msg.as_bytes());
-        }
-        child.wait()?
-    } else {
-        Command::new("amp")
-            .current_dir(working_dir)
-            .stdin(std::process::Stdio::inherit())
-            .stdout(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::inherit())
-            .status()?
-    };
-
-    // Restore TUI
-    enable_raw_mode()?;
-    execute!(stdout(), EnterAlternateScreen)?;
-
-    Ok(status)
-}
-
-/// Open `$EDITOR` (or `vi`) with `initial_content` pre-filled and return the
-/// edited text. Assumes the terminal is already in normal mode (not raw/alternate).
-/// Returns `None` if the user cleared the file or the editor exited with an error.
-fn edit_text_raw(initial_content: &str) -> Result<Option<String>> {
-    let mut tmp = tempfile::Builder::new()
-        .prefix("ishi-")
-        .suffix(".md")
-        .tempfile()?;
-    std::io::Write::write_all(&mut tmp, initial_content.as_bytes())?;
-    let path = tmp.path().to_path_buf();
-
-    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
-    let status = Command::new(&editor)
-        .arg(&path)
-        .stdin(std::process::Stdio::inherit())
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
-        .status()?;
-
-    if !status.success() {
-        return Ok(None);
-    }
-
-    let content = std::fs::read_to_string(&path)?;
-    let trimmed = content.trim();
-    if trimmed.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(trimmed.to_string()))
-    }
-}
-
 #[allow(dead_code)]
 /// Suspend the TUI, run an external command, then restore the TUI.
 ///
@@ -166,7 +89,7 @@ pub trait TerminalControl {
 }
 
 /// Real implementation that talks to the actual terminal.
-struct RealTerminal;
+pub struct RealTerminal;
 
 impl TerminalControl for RealTerminal {
     fn leave_alternate_screen(&mut self) -> Result<()> {

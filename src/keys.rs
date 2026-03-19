@@ -17,7 +17,6 @@ pub enum Action {
     NewThread,
     OpenIn,
     OpenRunLog,
-    RetryRun,
     MarkRunStale,
     Projects,
     ChangeState,
@@ -43,7 +42,6 @@ pub fn map_key(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Char('a')) => Some(Action::NewThread),
         (_, KeyCode::Char('o')) => Some(Action::OpenIn),
         (_, KeyCode::Char('l')) => Some(Action::OpenRunLog),
-        (KeyModifiers::SHIFT, KeyCode::Char('R')) => Some(Action::RetryRun),
         (_, KeyCode::Char('x')) => Some(Action::MarkRunStale),
         (_, KeyCode::Char('p')) => Some(Action::Projects),
         (_, KeyCode::Char('m')) => Some(Action::ChangeState),
@@ -164,14 +162,6 @@ mod tests {
         assert!(matches!(
             map_key(key(KeyCode::Char('l'))),
             Some(Action::OpenRunLog)
-        ));
-    }
-
-    #[test]
-    fn retry_run_on_shift_r() {
-        assert!(matches!(
-            map_key(key_with(KeyCode::Char('R'), KeyModifiers::SHIFT)),
-            Some(Action::RetryRun)
         ));
     }
 
