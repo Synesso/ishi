@@ -307,7 +307,12 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
     let key_style = Style::default()
         .fg(Color::Yellow)
         .add_modifier(Modifier::BOLD);
-    let bar = if app.awaiting_quit {
+    let bar = if let Some((ref msg, _)) = app.flash {
+        Line::from(Span::styled(
+            msg.as_str(),
+            Style::default().fg(Color::Green),
+        ))
+    } else if app.awaiting_quit {
         Line::from(vec![
             Span::raw("Press "),
             Span::styled("q", key_style),

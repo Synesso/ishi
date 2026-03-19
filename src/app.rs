@@ -338,6 +338,8 @@ pub struct App<A: LinearApi> {
     pub project_issues: Vec<Issue>,
     pub project_issue_selected: usize,
     pub detail_origin: DetailOrigin,
+    /// Transient message shown briefly in the status bar, with a remaining tick count.
+    pub flash: Option<(String, u8)>,
 }
 
 impl<A: LinearApi> App<A> {
@@ -387,6 +389,7 @@ impl<A: LinearApi> App<A> {
             project_issues: Vec::new(),
             project_issue_selected: 0,
             detail_origin: DetailOrigin::MyIssues,
+            flash: None,
         }
     }
 
@@ -975,6 +978,7 @@ impl<A: LinearApi> App<A> {
         self.project_cache.invalidate(CACHE_KEY_PROJECTS);
         self.fetch_and_cache_projects().await;
         self.refreshing = false;
+        self.flash = Some(("Refreshed ✓".into(), 15));
     }
 
     /// Load issues, serving from cache if fresh, otherwise fetching from API.
@@ -999,7 +1003,18 @@ impl<A: LinearApi> App<A> {
         self.fetch_and_cache_issues().await;
         self.fetch_and_cache_projects().await;
         self.refreshing = false;
+        self.flash = Some(("Refreshed ✓".into(), 15));
         self.context_issue().map(|i| i.identifier.clone())
+    }
+
+    /// Decrement the flash message tick counter; clears it when expired.
+    pub fn tick_flash(&mut self) {
+        if let Some((_, ref mut ticks)) = self.flash {
+            *ticks = ticks.saturating_sub(1);
+            if *ticks == 0 {
+                self.flash = None;
+            }
+        }
     }
 
     async fn fetch_and_cache_issues(&mut self) {

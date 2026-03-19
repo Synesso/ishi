@@ -329,6 +329,7 @@ async fn main() -> Result<()> {
         while let Ok(msg) = bg_error_rx.try_recv() {
             app.error = Some(app::AppError::new(msg));
         }
+        app.tick_flash();
         terminal.draw(|frame| {
             let area = frame.area();
             match app.view {
@@ -403,16 +404,17 @@ async fn main() -> Result<()> {
                                 app.workspace_picker = None;
                                 match edit_prompt(&context) {
                                     Ok(Some(prompt)) => {
-                                        if let Err(err) =
-                                            start_new_thread(&issue_id, &workspace, &prompt)
-                                        {
-                                            app.error = Some(app::AppError::new(format!(
-                                                "Failed to start thread: {err}"
-                                            )));
-                                        } else {
-                                            terminal.clear()?;
-                                            refresh_all(&mut app).await;
-                                        }
+                                        let tx = bg_error_tx.clone();
+                                        tokio::task::spawn_blocking(move || {
+                                            if let Err(err) =
+                                                start_new_thread(&issue_id, &workspace, &prompt)
+                                            {
+                                                let _ = tx.send(format!(
+                                                    "Failed to start thread: {err}"
+                                                ));
+                                            }
+                                        });
+                                        terminal.clear()?;
                                     }
                                     Ok(None) => {} // user cancelled
                                     Err(err) => {
@@ -472,16 +474,17 @@ async fn main() -> Result<()> {
                                 let workspace = workspace.clone();
                                 match edit_prompt(&context) {
                                     Ok(Some(prompt)) => {
-                                        if let Err(err) =
-                                            start_new_thread(&issue_id, &workspace, &prompt)
-                                        {
-                                            app.error = Some(app::AppError::new(format!(
-                                                "Failed to start thread: {err}"
-                                            )));
-                                        } else {
-                                            terminal.clear()?;
-                                            refresh_all(&mut app).await;
-                                        }
+                                        let tx = bg_error_tx.clone();
+                                        tokio::task::spawn_blocking(move || {
+                                            if let Err(err) =
+                                                start_new_thread(&issue_id, &workspace, &prompt)
+                                            {
+                                                let _ = tx.send(format!(
+                                                    "Failed to start thread: {err}"
+                                                ));
+                                            }
+                                        });
+                                        terminal.clear()?;
                                     }
                                     Ok(None) => {} // user cancelled
                                     Err(err) => {

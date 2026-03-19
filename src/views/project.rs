@@ -30,7 +30,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
     }
 
     let show_bar =
-        app.refreshing || app.awaiting_quit || app.awaiting_state_change || app.error.is_some();
+        app.refreshing || app.awaiting_quit || app.awaiting_state_change || app.error.is_some() || app.flash.is_some();
     let chunks = if show_bar {
         Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area)
     } else {
@@ -110,6 +110,12 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
             let line = Line::from(Span::styled(
                 "Refreshing...",
                 Style::default().fg(Color::Yellow),
+            ));
+            frame.render_widget(Paragraph::new(line), chunks[1]);
+        } else if let Some((ref msg, _)) = app.flash {
+            let line = Line::from(Span::styled(
+                msg.as_str(),
+                Style::default().fg(Color::Green),
             ));
             frame.render_widget(Paragraph::new(line), chunks[1]);
         } else if app.awaiting_state_change {
