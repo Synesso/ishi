@@ -1,6 +1,19 @@
 use std::cmp::Ordering;
 use std::time::Duration;
 
+/// Compare identifiers like "FOO-123" by prefix lexically, then suffix numerically.
+fn cmp_identifier(a: &str, b: &str) -> Ordering {
+    match (a.rsplit_once('-'), b.rsplit_once('-')) {
+        (Some((a_prefix, a_num)), Some((b_prefix, b_num))) => a_prefix
+            .cmp(b_prefix)
+            .then_with(|| match (a_num.parse::<u64>(), b_num.parse::<u64>()) {
+                (Ok(an), Ok(bn)) => an.cmp(&bn),
+                _ => a_num.cmp(b_num),
+            }),
+        _ => a.cmp(b),
+    }
+}
+
 use crate::amp::output::{OutputLine, SessionOutputBuffer};
 use crate::amp::state::SessionRunStatus;
 use crate::amp::thread::ThreadSummary;
@@ -420,7 +433,7 @@ impl<A: LinearApi> App<A> {
         if let Some((col, dir)) = &self.sort {
             issues.sort_by(|a, b| {
                 let ord = match col {
-                    SortColumn::Identifier => a.identifier.cmp(&b.identifier),
+                    SortColumn::Identifier => cmp_identifier(&a.identifier, &b.identifier),
                     SortColumn::Title => a.title.to_lowercase().cmp(&b.title.to_lowercase()),
                     SortColumn::Project => a.project_str().cmp(b.project_str()),
                     SortColumn::Status => a.status_str().cmp(b.status_str()),
@@ -3467,5 +3480,12 @@ mod tests {
         app.run_log_scroll = 0;
         app.scroll_run_log_up();
         assert_eq!(app.run_log_scroll, 0);
+    }
+
+    #[test]
+    fn cmp_identifier_sorts_numeric_suffix() {
+        let mut ids = vec!["FOO-223", "BAR-555", "FOO-36", "BAR-99"];
+        ids.sort_by(|a, b| cmp_identifier(a, b));
+        assert_eq!(ids, vec!["BAR-99", "BAR-555", "FOO-36", "FOO-223"]);
     }
 }
