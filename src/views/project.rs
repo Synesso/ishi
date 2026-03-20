@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::api::client::LinearApi;
-use crate::app::App;
+use crate::app::{App, SortDirection};
 
 pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
     let project_name = app
@@ -30,7 +30,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
     }
 
     let show_bar =
-        app.refreshing || app.awaiting_quit || app.awaiting_state_change || app.error.is_some() || app.flash.is_some();
+        app.refreshing || app.awaiting_quit || app.awaiting_sort || app.awaiting_state_change || app.error.is_some() || app.flash.is_some();
     let chunks = if show_bar {
         Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area)
     } else {
@@ -45,8 +45,9 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         Cell::from("Assignee").style(Style::default().add_modifier(Modifier::BOLD)),
     ]);
 
-    let rows: Vec<Row> = app
-        .project_issues
+    let issues = app.filtered_project_issues();
+
+    let rows: Vec<Row> = issues
         .iter()
         .map(|issue| {
             Row::new(vec![
@@ -65,7 +66,18 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         })
         .collect();
 
-    let title = format!("{} — Issues ({})", project_name, app.project_issues.len());
+    let sort_indicator = match &app.sort {
+        Some((col, dir)) => {
+            let arrow = match dir {
+                SortDirection::Asc => "↑",
+                SortDirection::Desc => "↓",
+            };
+            format!(" [sort: {} {}]", col.label(), arrow)
+        }
+        None => String::new(),
+    };
+
+    let title = format!("{} — Issues ({}){}", project_name, issues.len(), sort_indicator);
 
     let table = Table::new(
         rows,
@@ -82,7 +94,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
     .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
     let mut table_state = TableState::default();
-    if !app.project_issues.is_empty() {
+    if !issues.is_empty() {
         table_state.select(Some(app.project_issue_selected));
     }
 
@@ -135,6 +147,20 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
                     spans.push(Span::raw("  "));
                 }
             }
+            frame.render_widget(Paragraph::new(Line::from(spans)), chunks[1]);
+        } else if app.awaiting_sort {
+            let column_hints = vec![
+                Span::styled("i", key_style),
+                Span::raw("d  "),
+                Span::styled("t", key_style),
+                Span::raw("itle  "),
+                Span::styled("s", key_style),
+                Span::raw("tatus  p"),
+                Span::styled("r", key_style),
+                Span::raw("iority"),
+            ];
+            let mut spans = vec![Span::raw("sort by: ")];
+            spans.extend(column_hints);
             frame.render_widget(Paragraph::new(Line::from(spans)), chunks[1]);
         } else if app.awaiting_quit {
             let line = Line::from(vec![

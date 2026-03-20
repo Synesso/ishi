@@ -451,12 +451,36 @@ impl<A: LinearApi> App<A> {
         issues
     }
 
+    pub fn filtered_project_issues(&self) -> Vec<&Issue> {
+        let mut issues: Vec<&Issue> = self.project_issues.iter().collect();
+        if let Some((col, dir)) = &self.sort {
+            issues.sort_by(|a, b| {
+                let ord = match col {
+                    SortColumn::Identifier => cmp_identifier(&a.identifier, &b.identifier),
+                    SortColumn::Title => a.title.to_lowercase().cmp(&b.title.to_lowercase()),
+                    SortColumn::Project => a.project_str().cmp(b.project_str()),
+                    SortColumn::Status => a.status_str().cmp(b.status_str()),
+                    SortColumn::Priority => a
+                        .priority
+                        .partial_cmp(&b.priority)
+                        .unwrap_or(Ordering::Equal),
+                };
+                match dir {
+                    SortDirection::Asc => ord,
+                    SortDirection::Desc => ord.reverse(),
+                }
+            });
+        }
+        issues
+    }
+
     pub fn set_sort(&mut self, col: SortColumn) {
         self.sort = Some(match self.sort {
             Some((c, dir)) if c == col => (col, dir.toggle()),
             _ => (col, SortDirection::Asc),
         });
         self.selected = 0;
+        self.project_issue_selected = 0;
     }
 
     pub fn move_down(&mut self) {
@@ -888,7 +912,7 @@ impl<A: LinearApi> App<A> {
     }
 
     pub fn project_issue_move_down(&mut self) {
-        let len = self.project_issues.len();
+        let len = self.filtered_project_issues().len();
         if len > 0 && self.project_issue_selected < len - 1 {
             self.project_issue_selected += 1;
         }
@@ -905,14 +929,16 @@ impl<A: LinearApi> App<A> {
     }
 
     pub fn project_issue_bottom(&mut self) {
-        let len = self.project_issues.len();
+        let len = self.filtered_project_issues().len();
         if len > 0 {
             self.project_issue_selected = len - 1;
         }
     }
 
     pub fn selected_project_issue(&self) -> Option<&Issue> {
-        self.project_issues.get(self.project_issue_selected)
+        self.filtered_project_issues()
+            .get(self.project_issue_selected)
+            .copied()
     }
 
     pub fn select_project_issue(&mut self) {
