@@ -11,6 +11,14 @@ use crate::amp::state::SessionRunStatus;
 use crate::api::client::LinearApi;
 use crate::app::{App, DetailSection};
 
+fn clamp_scroll(scroll: u16, max_scroll: u16) -> u16 {
+    if scroll == u16::MAX {
+        max_scroll
+    } else {
+        scroll.min(max_scroll)
+    }
+}
+
 pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
     if app.detail_section == DetailSection::RunLog {
         render_run_log(frame, area, app);
@@ -167,7 +175,8 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
 
     let content_lines = body_lines.len() as u16;
     let inner_height = chunks[1].height.saturating_sub(2); // borders
-    let scroll = app.detail_scroll;
+    let detail_scroll_max = content_lines.saturating_sub(inner_height);
+    let scroll = clamp_scroll(app.detail_scroll, detail_scroll_max);
 
     let body_focused = app.detail_section == DetailSection::Body;
     let body_border_style = if body_focused {
@@ -187,8 +196,8 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
         .scroll((scroll, 0));
 
     frame.render_widget(detail, chunks[1]);
-
-    app.detail_scroll_max = content_lines.saturating_sub(inner_height);
+    app.detail_scroll_max = detail_scroll_max;
+    app.detail_scroll = scroll;
 
     // Output section
     if has_output {
@@ -205,8 +214,8 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
 
         let output_line_count = output_display.len() as u16;
         let output_inner = chunks[2].height.saturating_sub(2);
-        let output_scroll = app.detail_output_scroll;
-        app.detail_output_scroll_max = output_line_count.saturating_sub(output_inner);
+        let output_scroll_max = output_line_count.saturating_sub(output_inner);
+        let output_scroll = clamp_scroll(app.detail_output_scroll, output_scroll_max);
 
         let session_indicator = app
             .selected_thread()
@@ -225,6 +234,8 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
             .wrap(Wrap { trim: false })
             .scroll((output_scroll, 0));
         frame.render_widget(output_block, chunks[2]);
+        app.detail_output_scroll_max = output_scroll_max;
+        app.detail_output_scroll = output_scroll;
     }
 
     // Message input bar
@@ -497,7 +508,10 @@ fn render_run_log<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>)
 
     let line_count = log_lines.len() as u16;
     let inner_height = chunks[0].height.saturating_sub(2);
-    app.run_log_scroll_max = line_count.saturating_sub(inner_height);
+    let run_log_scroll_max = line_count.saturating_sub(inner_height);
+    app.run_log_scroll_max = run_log_scroll_max;
+    let run_log_scroll = clamp_scroll(app.run_log_scroll, run_log_scroll_max);
+    app.run_log_scroll = run_log_scroll;
 
     let log_block = Paragraph::new(log_lines)
         .block(
@@ -507,7 +521,7 @@ fn render_run_log<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>)
                 .border_style(Style::default().fg(Color::Cyan)),
         )
         .wrap(Wrap { trim: false })
-        .scroll((app.run_log_scroll, 0));
+        .scroll((run_log_scroll, 0));
     frame.render_widget(log_block, chunks[0]);
 
     let key_style = Style::default()
@@ -564,5 +578,16 @@ mod tests {
             run_status_style(SessionRunStatus::Completed).fg,
             Some(Color::Cyan)
         );
+    }
+
+    #[test]
+    fn clamp_scroll_handles_follow_bottom_sentinel() {
+        assert_eq!(clamp_scroll(u16::MAX, 42), 42);
+    }
+
+    #[test]
+    fn clamp_scroll_caps_regular_scroll_to_max() {
+        assert_eq!(clamp_scroll(99, 5), 5);
+        assert_eq!(clamp_scroll(3, 5), 3);
     }
 }
