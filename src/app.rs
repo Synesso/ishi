@@ -1097,11 +1097,14 @@ impl<A: LinearApi> App<A> {
     }
 
     /// Decrement the flash message tick counter; clears it when expired.
+    /// A ticks value of `0` means the message is sticky and won't auto-expire.
     pub fn tick_flash(&mut self) {
         if let Some((_, ref mut ticks)) = self.flash {
-            *ticks = ticks.saturating_sub(1);
-            if *ticks == 0 {
-                self.flash = None;
+            if *ticks > 0 {
+                *ticks = ticks.saturating_sub(1);
+                if *ticks == 0 {
+                    self.flash = None;
+                }
             }
         }
     }
@@ -3383,6 +3386,16 @@ mod tests {
         assert_eq!(app.flash.as_ref().map(|(_, t)| *t), Some(1));
         app.tick_flash();
         assert!(app.flash.is_none());
+    }
+
+    #[test]
+    fn tick_flash_sticky_when_zero() {
+        let mut app = app_with_issues();
+        app.flash = Some(("Starting thread …".into(), 0));
+        app.tick_flash();
+        assert_eq!(app.flash.as_ref().map(|(m, _)| m.as_str()), Some("Starting thread …"));
+        app.tick_flash();
+        assert_eq!(app.flash.as_ref().map(|(m, _)| m.as_str()), Some("Starting thread …"));
     }
 
     #[test]
