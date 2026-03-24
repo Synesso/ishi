@@ -319,6 +319,7 @@ pub struct App<A: LinearApi> {
     pub awaiting_state_change: bool,
     pub state_options: Vec<String>,
     pub state_selected: usize,
+    pub state_type_ahead: String,
     pub sort: Option<(SortColumn, SortDirection)>,
     pub search: Option<String>,
     pub search_input: String,
@@ -375,6 +376,7 @@ impl<A: LinearApi> App<A> {
             awaiting_state_change: false,
             state_options: Vec::new(),
             state_selected: 0,
+            state_type_ahead: String::new(),
             sort: None,
             search: None,
             search_input: String::new(),
@@ -968,13 +970,43 @@ impl<A: LinearApi> App<A> {
         self.state_selected = current
             .and_then(|c| self.state_options.iter().position(|s| s == &c))
             .unwrap_or(0);
+        self.state_type_ahead.clear();
         self.awaiting_state_change = true;
+        self.flash = None;
     }
 
     pub fn cancel_state_change(&mut self) {
         self.awaiting_state_change = false;
         self.state_options.clear();
         self.state_selected = 0;
+        self.state_type_ahead.clear();
+    }
+
+    pub fn state_type_ahead_push(&mut self, c: char) {
+        self.state_type_ahead.push(c);
+        let needle = self.state_type_ahead.to_lowercase();
+        if let Some(pos) = self
+            .state_options
+            .iter()
+            .position(|s| s.to_lowercase().starts_with(&needle))
+        {
+            self.state_selected = pos;
+        }
+    }
+
+    pub fn state_type_ahead_pop(&mut self) {
+        self.state_type_ahead.pop();
+        if self.state_type_ahead.is_empty() {
+            return;
+        }
+        let needle = self.state_type_ahead.to_lowercase();
+        if let Some(pos) = self
+            .state_options
+            .iter()
+            .position(|s| s.to_lowercase().starts_with(&needle))
+        {
+            self.state_selected = pos;
+        }
     }
 
     pub fn state_change_move_down(&mut self) {

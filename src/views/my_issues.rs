@@ -200,6 +200,12 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         frame.render_widget(Paragraph::new(line), chunks[1]);
     } else if app.awaiting_state_change {
         let mut spans = vec![Span::raw("move to: ")];
+        if !app.state_type_ahead.is_empty() {
+            spans.push(Span::styled(
+                format!("[{}] ", app.state_type_ahead),
+                Style::default().fg(Color::Cyan),
+            ));
+        }
         for (i, state) in app.state_options.iter().enumerate() {
             if i == app.state_selected {
                 spans.push(Span::styled(

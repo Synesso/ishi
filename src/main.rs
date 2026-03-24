@@ -614,10 +614,10 @@ async fn main() -> Result<()> {
                         }
                     }
                     KeyCode::Esc => app.cancel_state_change(),
-                    KeyCode::Char('j') | KeyCode::Down | KeyCode::Right => {
-                        app.state_change_move_down()
-                    }
-                    KeyCode::Char('k') | KeyCode::Up | KeyCode::Left => app.state_change_move_up(),
+                    KeyCode::Down | KeyCode::Right => app.state_change_move_down(),
+                    KeyCode::Up | KeyCode::Left => app.state_change_move_up(),
+                    KeyCode::Backspace => app.state_type_ahead_pop(),
+                    KeyCode::Char(c) => app.state_type_ahead_push(c),
                     _ => {}
                 }
             } else if app.awaiting_sort {

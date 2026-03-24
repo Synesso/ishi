@@ -83,6 +83,7 @@ query($issueId: String!) {
           id
           name
           type
+          position
         }
       }
     }
@@ -277,25 +278,16 @@ impl LinearApi for LinearClient {
             .as_array()
             .ok_or_else(|| anyhow::anyhow!("failed to fetch workflow states"))?;
 
-        // Linear state types define the workflow category. Sort by lifecycle order.
-        let type_order = |t: &str| match t {
-            "backlog" => 0,
-            "unstarted" => 1,
-            "started" => 2,
-            "completed" => 3,
-            "canceled" => 4,
-            _ => 5,
-        };
-
-        let mut state_entries: Vec<(String, String)> = states
+        // Sort by position as configured in the Linear project.
+        let mut state_entries: Vec<(String, f64)> = states
             .iter()
             .filter_map(|s| {
                 let name = s["name"].as_str()?.to_string();
-                let stype = s["type"].as_str().unwrap_or("").to_string();
-                Some((name, stype))
+                let position = s["position"].as_f64().unwrap_or(f64::MAX);
+                Some((name, position))
             })
             .collect();
-        state_entries.sort_by_key(|(_, t)| type_order(t));
+        state_entries.sort_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         Ok(state_entries.into_iter().map(|(name, _)| name).collect())
     }
