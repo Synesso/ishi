@@ -43,6 +43,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         Cell::from("Status").style(Style::default().add_modifier(Modifier::BOLD)),
         Cell::from("Priority").style(Style::default().add_modifier(Modifier::BOLD)),
         Cell::from("Assignee").style(Style::default().add_modifier(Modifier::BOLD)),
+        Cell::from("Amp").style(Style::default().add_modifier(Modifier::BOLD)),
     ]);
 
     let issues = app.filtered_project_issues();
@@ -50,6 +51,14 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
     let rows: Vec<Row> = issues
         .iter()
         .map(|issue| {
+            let thread_display = app.thread_count_display(&issue.identifier);
+            let thread_style = if thread_display.contains('/') {
+                Style::default().fg(Color::Green)
+            } else if thread_display == "-" {
+                Style::default().fg(Color::DarkGray)
+            } else {
+                Style::default()
+            };
             Row::new(vec![
                 Cell::from(issue.identifier.as_str()),
                 Cell::from(issue.title.as_str()),
@@ -62,6 +71,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
                     priority_style(issue.priority_str()),
                 )),
                 Cell::from(issue.assignee.as_ref().map_or("—", |a| a.name.as_str())),
+                Cell::from(Span::styled(thread_display, thread_style)),
             ])
         })
         .collect();
@@ -87,6 +97,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
             Constraint::Length(15),
             Constraint::Length(10),
             Constraint::Length(20),
+            Constraint::Length(5),
         ],
     )
     .header(header)

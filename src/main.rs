@@ -233,6 +233,43 @@ fn detect_terminal() -> &'static str {
     }
 }
 
+/// Launch an existing thread in a new terminal window.
+/// Opens a terminal running `amp threads continue <thread_id>` in the thread's workspace.
+fn launch_thread(thread_id: &str, workspace: &str) -> Result<()> {
+    let run_dir = dirs::cache_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .join("ishi")
+        .join("run-logs");
+    std::fs::create_dir_all(&run_dir)?;
+
+    let launcher_path = run_dir.join(format!("{}.launch.sh", thread_id));
+    let launcher_script = format!(
+        r#"#!/usr/bin/env bash
+cd {workspace} || exit 1
+amp threads continue {thread_id}
+rm -f {launcher}
+"#,
+        workspace = shell_escape::unix::escape(workspace.into()),
+        thread_id = shell_escape::unix::escape(thread_id.into()),
+        launcher = shell_escape::unix::escape(launcher_path.to_string_lossy().into_owned().into()),
+    );
+    std::fs::write(&launcher_path, &launcher_script)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&launcher_path, std::fs::Permissions::from_mode(0o755))?;
+    }
+
+    let terminal_app = detect_terminal();
+    std::process::Command::new("open")
+        .args(["-a", terminal_app, launcher_path.to_str().unwrap_or("")])
+        .spawn()
+        .context("failed to open terminal window")?;
+
+    Ok(())
+}
+
 /// Execute the new-thread flow:
 /// 1. Create a thread via `amp threads new`
 /// 2. Write a launcher script that pipes the prompt to `amp threads continue`
@@ -341,6 +378,7 @@ async fn main() -> Result<()> {
                 }
                 BgMessage::ThreadCreated { issue_identifier } => {
                     app.flash = Some(("Thread started ✓".into(), 30));
+                    app.load_thread_counts();
                     // Reload threads if we're viewing the same issue.
                     if app
                         .context_issue()
@@ -362,6 +400,7 @@ async fn main() -> Result<()> {
             let has_active = app.active_run_counts() != (0, 0);
             // Reload thread data when statuses changed or runs are still active.
             if reconciled || has_active {
+                app.load_thread_counts();
                 if let Some(issue) = app.context_issue() {
                     let id = issue.identifier.clone();
                     load_threads_for_issue(&mut app, &id);
@@ -771,10 +810,27 @@ async fn main() -> Result<()> {
                                 }
                             }
                             keys::Action::OpenRunLog => {
-                                if let Some(run) = app.selected_thread_run()
-                                    && let Some(log_path) = run.log_path.clone()
-                                {
-                                    app.focus_run_log(&log_path);
+                                if let Some(thread) = app.selected_thread() {
+                                    let thread_id = thread.id.clone();
+                                    let state_path = amp::state::state_path();
+                                    let workspace = state_path.ok().and_then(|p| {
+                                        amp::state::State::load(&p).ok().and_then(|s| {
+                                            s.thread_links
+                                                .get(&thread_id)
+                                                .map(|l| l.workspace.clone())
+                                        })
+                                    });
+                                    if let Some(ws) = workspace {
+                                        if let Err(err) = launch_thread(&thread_id, &ws) {
+                                            app.error = Some(app::AppError::new(format!(
+                                                "Failed to launch thread: {err}"
+                                            )));
+                                        }
+                                    } else {
+                                        app.error = Some(app::AppError::new(
+                                            "No workspace found for this thread".to_string(),
+                                        ));
+                                    }
                                 }
                             }
                             keys::Action::MarkRunStale => {

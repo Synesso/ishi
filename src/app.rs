@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::time::Duration;
 
 /// Compare identifiers like "FOO-123" by prefix lexically, then suffix numerically.
@@ -355,6 +356,9 @@ pub struct App<A: LinearApi> {
     pub detail_origin: DetailOrigin,
     /// Transient message shown briefly in the status bar, with a remaining tick count.
     pub flash: Option<(String, u8)>,
+    /// Per-issue thread counts: issue identifier → (active, total).
+    /// Active means Running or Pending session runs.
+    pub thread_counts: HashMap<String, (usize, usize)>,
 }
 
 impl<A: LinearApi> App<A> {
@@ -410,6 +414,7 @@ impl<A: LinearApi> App<A> {
             project_issue_selected: 0,
             detail_origin: DetailOrigin::MyIssues,
             flash: None,
+            thread_counts: HashMap::new(),
         }
     }
 
@@ -668,6 +673,56 @@ impl<A: LinearApi> App<A> {
             .filter(|r| r.status == SessionRunStatus::Pending)
             .count();
         (running, pending)
+    }
+
+    /// Compute thread counts for all issues from persisted state.
+    /// Populates `thread_counts` with (active, total) per issue identifier,
+    /// where active means the issue has a session run with Running or Pending status.
+    pub fn load_thread_counts(&mut self) {
+        use crate::amp::state;
+        let state_path = match state::state_path() {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        let s = match state::State::load(&state_path) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+
+        // Count total threads per issue from thread_links.
+        let mut totals: HashMap<String, usize> = HashMap::new();
+        for link in s.thread_links.values() {
+            *totals.entry(link.issue.clone()).or_default() += 1;
+        }
+
+        // Count active session runs per issue.
+        let mut active: HashMap<String, usize> = HashMap::new();
+        for run in s.session_runs.values() {
+            if matches!(
+                run.status,
+                SessionRunStatus::Running | SessionRunStatus::Pending
+            ) {
+                *active.entry(run.issue.clone()).or_default() += 1;
+            }
+        }
+
+        self.thread_counts = totals
+            .into_iter()
+            .map(|(issue, total)| {
+                let act = active.get(&issue).copied().unwrap_or(0);
+                (issue, (act, total))
+            })
+            .collect();
+    }
+
+    /// Format thread count for display in the issues list.
+    /// Returns "-" if no threads, "active/total" if active, or "total" otherwise.
+    pub fn thread_count_display(&self, issue_identifier: &str) -> String {
+        match self.thread_counts.get(issue_identifier) {
+            None => "-".to_string(),
+            Some((active, total)) if *active > 0 => format!("{}/{}", active, total),
+            Some((_, total)) => total.to_string(),
+        }
     }
 
     pub fn focus_threads(&mut self) {
@@ -1107,10 +1162,12 @@ impl<A: LinearApi> App<A> {
     pub async fn load_issues(&mut self) {
         if let Some(cached) = self.cache.get(CACHE_KEY_MY_ISSUES) {
             self.issues = cached.clone();
+            self.load_thread_counts();
             return;
         }
         self.loading = self.issues.is_empty();
         self.fetch_and_cache_issues().await;
+        self.load_thread_counts();
         self.loading = false;
     }
 
@@ -1123,6 +1180,7 @@ impl<A: LinearApi> App<A> {
         self.project_cache.invalidate(CACHE_KEY_PROJECTS);
         self.fetch_and_cache_issues().await;
         self.fetch_and_cache_projects().await;
+        self.load_thread_counts();
         self.refreshing = false;
         self.flash = Some(("Refreshed ✓".into(), 15));
         self.context_issue().map(|i| i.identifier.clone())

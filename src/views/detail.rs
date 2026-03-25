@@ -394,17 +394,22 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
             spans.push(Span::styled("k", key_style));
             spans.push(Span::raw(" navigate"));
         }
-        if app.selected_thread_run().is_some() {
+        if app.selected_thread().is_some() {
             spans.push(Span::raw("  "));
             spans.push(Span::styled("l", key_style));
-            spans.push(Span::raw(" log  "));
+            spans.push(Span::raw(" launch"));
+        }
+        if app.selected_thread_run().is_some() {
+            spans.push(Span::raw("  "));
             spans.push(Span::styled("x", key_style));
-            spans.push(Span::raw(" stale  "));
+            spans.push(Span::raw(" stale"));
         }
         if app.selected_thread().is_some_and(|t| app.output_buffer.line_count(&t.id) > 0) {
+            spans.push(Span::raw("  "));
             spans.push(Span::styled("o", key_style));
-            spans.push(Span::raw(" output  "));
+            spans.push(Span::raw(" output"));
         }
+        spans.push(Span::raw("  "));
         spans.push(Span::styled("a", key_style));
         spans.push(Span::raw(" new thread"));
         Line::from(spans)

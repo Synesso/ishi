@@ -31,6 +31,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         Cell::from("Project").style(Style::default().add_modifier(Modifier::BOLD)),
         Cell::from("Status").style(Style::default().add_modifier(Modifier::BOLD)),
         Cell::from("Priority").style(Style::default().add_modifier(Modifier::BOLD)),
+        Cell::from("Amp").style(Style::default().add_modifier(Modifier::BOLD)),
     ]);
 
     let search_query = app.search.as_deref();
@@ -38,6 +39,14 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
     let rows: Vec<Row> = issues
         .iter()
         .map(|issue| {
+            let thread_display = app.thread_count_display(&issue.identifier);
+            let thread_style = if thread_display.contains('/') {
+                Style::default().fg(Color::Green)
+            } else if thread_display == "-" {
+                Style::default().fg(Color::DarkGray)
+            } else {
+                Style::default()
+            };
             Row::new(vec![
                 Cell::from(Line::from(highlight_match(
                     issue.identifier.as_str(),
@@ -64,6 +73,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
                     search_query,
                     priority_style(issue.priority_str()),
                 ))),
+                Cell::from(Span::styled(thread_display, thread_style)),
             ])
         })
         .collect();
@@ -110,6 +120,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
             Constraint::Length(20),
             Constraint::Length(15),
             Constraint::Length(10),
+            Constraint::Length(5),
         ],
     )
     .header(header)
