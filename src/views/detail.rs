@@ -364,6 +364,12 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
             Span::styled("g", key_style),
             Span::raw("ithub PR"),
         ])
+    } else if app.awaiting_copy {
+        Line::from(vec![
+            Span::raw("copy: "),
+            Span::styled("p", key_style),
+            Span::raw("rompt"),
+        ])
     } else if app.message_input_active {
         Line::from(vec![
             Span::styled("Enter", key_style),
@@ -412,6 +418,9 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
         spans.push(Span::raw("  "));
         spans.push(Span::styled("a", key_style));
         spans.push(Span::raw(" new thread"));
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled("c", key_style));
+        spans.push(Span::raw(" copy"));
         Line::from(spans)
     } else {
         let can_scroll = content_lines > inner_height;
@@ -431,6 +440,9 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
         spans.push(Span::raw("  "));
         spans.push(Span::styled("a", key_style));
         spans.push(Span::raw(" new thread"));
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled("c", key_style));
+        spans.push(Span::raw(" copy"));
         Line::from(spans)
     };
     frame.render_widget(Paragraph::new(bar), chunks[5]);

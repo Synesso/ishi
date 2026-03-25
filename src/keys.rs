@@ -21,6 +21,7 @@ pub enum Action {
     Projects,
     ChangeState,
     SendInstruction,
+    Copy,
 }
 
 pub fn map_key(key: KeyEvent) -> Option<Action> {
@@ -46,6 +47,7 @@ pub fn map_key(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Char('p')) => Some(Action::Projects),
         (_, KeyCode::Char('m')) => Some(Action::ChangeState),
         (_, KeyCode::Char('i')) => Some(Action::SendInstruction),
+        (_, KeyCode::Char('c')) => Some(Action::Copy),
         _ => None,
     }
 }

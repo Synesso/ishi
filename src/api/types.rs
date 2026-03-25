@@ -24,10 +24,17 @@ pub struct Issue {
     pub labels: Option<IssueLabels>,
     pub comments: Option<IssueComments>,
     pub parent: Option<Box<IssueParent>>,
+    pub team: Option<IssueTeam>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct IssueProject {
+    pub name: String,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct IssueTeam {
     pub name: String,
 }
 
@@ -76,6 +83,32 @@ impl Issue {
             Some(4) => "Low",
             _ => "—",
         }
+    }
+
+    pub fn agent_prompt(&self) -> String {
+        let mut prompt = format!(
+            "Work on Linear issue {}:\n\n<issue identifier=\"{}\">",
+            self.identifier, self.identifier
+        );
+        prompt.push_str(&format!("\n<title>{}</title>", self.title));
+        if let Some(desc) = &self.description {
+            prompt.push_str(&format!("\n<description>\n{}\n</description>", desc));
+        }
+        if let Some(team) = &self.team {
+            prompt.push_str(&format!("\n<team name=\"{}\"/>", team.name));
+        }
+        if let Some(project) = &self.project {
+            if let Some(desc) = &project.description {
+                prompt.push_str(&format!(
+                    "\n<project name=\"{}\">{}</project>",
+                    project.name, desc
+                ));
+            } else {
+                prompt.push_str(&format!("\n<project name=\"{}\"/>", project.name));
+            }
+        }
+        prompt.push_str("\n</issue>");
+        prompt
     }
 
     pub fn matches_search(&self, query: &str) -> bool {
@@ -215,5 +248,58 @@ mod tests {
         assert_eq!(issues.len(), 2);
         assert_eq!(issues[0].identifier, "JEM-1");
         assert_eq!(issues[1].identifier, "JEM-2");
+    }
+
+    #[test]
+    fn agent_prompt_minimal() {
+        let issue = Issue {
+            id: "1".into(),
+            identifier: "JEM-42".into(),
+            title: "Fix the widget".into(),
+            url: None,
+            state: None,
+            priority: None,
+            project: None,
+            description: None,
+            assignee: None,
+            labels: None,
+            comments: None,
+            parent: None,
+            team: None,
+        };
+        let prompt = issue.agent_prompt();
+        assert!(prompt.starts_with("Work on Linear issue JEM-42:"));
+        assert!(prompt.contains("<issue identifier=\"JEM-42\">"));
+        assert!(prompt.contains("<title>Fix the widget</title>"));
+        assert!(prompt.contains("</issue>"));
+        assert!(!prompt.contains("<description>"));
+        assert!(!prompt.contains("<team"));
+        assert!(!prompt.contains("<project"));
+    }
+
+    #[test]
+    fn agent_prompt_full() {
+        let issue = Issue {
+            id: "1".into(),
+            identifier: "JEM-1".into(),
+            title: "Add feature".into(),
+            url: None,
+            state: None,
+            priority: None,
+            project: Some(IssueProject {
+                name: "ishi".into(),
+                description: Some("A TUI for Linear".into()),
+            }),
+            description: Some("Implement the thing".into()),
+            assignee: None,
+            labels: None,
+            comments: None,
+            parent: None,
+            team: Some(IssueTeam { name: "Jem".into() }),
+        };
+        let prompt = issue.agent_prompt();
+        assert!(prompt.contains("<description>\nImplement the thing\n</description>"));
+        assert!(prompt.contains("<team name=\"Jem\"/>"));
+        assert!(prompt.contains("<project name=\"ishi\">A TUI for Linear</project>"));
     }
 }

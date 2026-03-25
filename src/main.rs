@@ -262,11 +262,41 @@ rm -f {launcher}
     }
 
     let terminal_app = detect_terminal();
-    std::process::Command::new("open")
-        .args(["-a", terminal_app, launcher_path.to_str().unwrap_or("")])
-        .spawn()
-        .context("failed to open terminal window")?;
+    open_in_terminal(terminal_app, &launcher_path)?;
 
+    Ok(())
+}
+
+/// Open a launcher script in a new terminal window.
+/// For Ghostty on macOS, uses AppleScript to create a new window with the
+/// launcher as the command, ensuring it always opens in a dedicated window
+/// rather than a tab in the existing instance.
+fn open_in_terminal(terminal_app: &str, launcher_path: &Path) -> Result<()> {
+    let launcher_str = launcher_path
+        .to_str()
+        .context("launcher path is not valid UTF-8")?;
+
+    if terminal_app == "Ghostty" {
+        let script = format!(
+            r#"tell application "Ghostty"
+    activate
+    set cfg to new surface configuration
+    set command of cfg to "{}"
+    set wait after command of cfg to true
+    new window with configuration cfg
+end tell"#,
+            launcher_str.replace('\\', "\\\\").replace('"', "\\\"")
+        );
+        std::process::Command::new("osascript")
+            .args(["-e", &script])
+            .spawn()
+            .context("failed to open Ghostty window via AppleScript")?;
+    } else {
+        std::process::Command::new("open")
+            .args(["-a", terminal_app, launcher_str])
+            .spawn()
+            .context("failed to open terminal window")?;
+    }
     Ok(())
 }
 
@@ -327,10 +357,7 @@ rm -f {prompt_file} {launcher}
 
     // Open in a new terminal window of the same type
     let terminal_app = detect_terminal();
-    std::process::Command::new("open")
-        .args(["-a", terminal_app, launcher_path.to_str().unwrap_or("")])
-        .spawn()
-        .context("failed to open terminal window")?;
+    open_in_terminal(terminal_app, &launcher_path)?;
 
     // Persist thread link (no session run tracking)
     let state_path = amp::state::state_path()?;
@@ -610,6 +637,25 @@ async fn main() -> Result<()> {
                     }
                     _ => {}
                 }
+            } else if app.awaiting_copy {
+                app.awaiting_copy = false;
+                if let KeyCode::Char('p') = key.code {
+                    if let Some(issue) = app.context_issue() {
+                        let prompt = issue.agent_prompt();
+                        let mut child = std::process::Command::new("pbcopy")
+                            .stdin(std::process::Stdio::piped())
+                            .spawn()
+                            .ok();
+                        if let Some(ref mut child) = child {
+                            use std::io::Write;
+                            if let Some(ref mut stdin) = child.stdin {
+                                let _ = stdin.write_all(prompt.as_bytes());
+                            }
+                            let _ = child.wait();
+                            app.flash = Some(("Prompt copied ✓".into(), 15));
+                        }
+                    }
+                }
             } else if app.awaiting_state_change {
                 match key.code {
                     KeyCode::Enter => {
@@ -844,6 +890,7 @@ async fn main() -> Result<()> {
                                     )));
                                 }
                             }
+                            keys::Action::Copy => app.awaiting_copy = true,
                             keys::Action::Help => app.toggle_help(),
                             _ => {}
                         },
@@ -857,6 +904,7 @@ async fn main() -> Result<()> {
                             keys::Action::Tab => app.focus_threads(),
                             keys::Action::NewThread => open_workspace_picker(&mut app),
                             keys::Action::OpenIn => app.awaiting_open = true,
+                            keys::Action::Copy => app.awaiting_copy = true,
                             keys::Action::Help => app.toggle_help(),
                             keys::Action::ChangeState => {
                                 if let Some(issue) = app.context_issue() {
@@ -900,6 +948,15 @@ async fn main() -> Result<()> {
                     keys::Action::OrderBy => app.awaiting_sort = true,
                     keys::Action::FilterBy => app.awaiting_filter = true,
                     keys::Action::Refresh => refresh_all(&mut app).await,
+                    keys::Action::NewThread => {
+                        let id = app.selected_issue().map(|i| i.identifier.clone());
+                        app.select_issue();
+                        if let Some(id) = id {
+                            load_threads_for_issue(&mut app, &id);
+                        }
+                        app.detail_section = app::DetailSection::Threads;
+                        open_workspace_picker(&mut app);
+                    }
                     keys::Action::OpenIn => app.awaiting_open = true,
                     keys::Action::Help => app.toggle_help(),
                     keys::Action::Projects => {
@@ -954,6 +1011,7 @@ mod tests {
             labels: None,
             comments: None,
             parent: None,
+            team: None,
         }];
         app.detail_section = DetailSection::Threads;
         app.detail_threads = vec![ThreadSummary {
@@ -1000,6 +1058,7 @@ mod tests {
             labels: None,
             comments: None,
             parent: None,
+            team: None,
         }
     }
 
@@ -1024,6 +1083,7 @@ mod tests {
             }),
             project: Some(IssueProject {
                 name: "ishi".into(),
+                description: None,
             }),
             labels: Some(IssueLabels {
                 nodes: vec![

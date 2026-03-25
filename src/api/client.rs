@@ -36,7 +36,7 @@ query($after: String) {
         url
         state { name }
         priority
-        project { name }
+        project { name description }
         description
         assignee { name }
         labels { nodes { name } }
@@ -49,6 +49,7 @@ query($after: String) {
           state { name }
           labels { nodes { name } }
         }
+        team { name }
       }
     }
   }
@@ -126,7 +127,7 @@ query($projectId: String!, $after: String) {
         url
         state { name }
         priority
-        project { name }
+        project { name description }
         description
         assignee { name }
         labels { nodes { name } }
@@ -139,6 +140,7 @@ query($projectId: String!, $after: String) {
           state { name }
           labels { nodes { name } }
         }
+        team { name }
       }
     }
   }
