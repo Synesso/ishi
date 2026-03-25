@@ -321,7 +321,31 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
     let key_style = Style::default()
         .fg(Color::Yellow)
         .add_modifier(Modifier::BOLD);
-    let bar = if let Some((ref msg, _)) = app.flash {
+    let bar = if app.awaiting_state_change {
+        let mut spans = vec![Span::raw("move to: ")];
+        if !app.state_type_ahead.is_empty() {
+            spans.push(Span::styled(
+                format!("[{}] ", app.state_type_ahead),
+                Style::default().fg(Color::Cyan),
+            ));
+        }
+        for (i, state) in app.state_options.iter().enumerate() {
+            if i == app.state_selected {
+                spans.push(Span::styled(
+                    state.as_str(),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            } else {
+                spans.push(Span::raw(state.as_str()));
+            }
+            if i < app.state_options.len() - 1 {
+                spans.push(Span::raw("  "));
+            }
+        }
+        Line::from(spans)
+    } else if let Some((ref msg, _)) = app.flash {
         Line::from(Span::styled(
             msg.as_str(),
             Style::default().fg(Color::Green),
