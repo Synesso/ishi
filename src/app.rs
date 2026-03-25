@@ -347,6 +347,8 @@ pub struct App<A: LinearApi> {
     pub message_input_active: bool,
     pub message_input: String,
     pub show_help: bool,
+    pub comment_input_active: bool,
+    pub comment_input: String,
     pub cache: ResponseCache<Vec<Issue>>,
     pub projects: Vec<Project>,
     pub project_selected: usize,
@@ -407,6 +409,8 @@ impl<A: LinearApi> App<A> {
             message_input_active: false,
             message_input: String::new(),
             show_help: false,
+            comment_input_active: false,
+            comment_input: String::new(),
             cache: ResponseCache::new(Duration::from_secs(CACHE_TTL_SECS)),
             projects: Vec::new(),
             project_selected: 0,
@@ -596,6 +600,8 @@ impl<A: LinearApi> App<A> {
         self.detail_output_scroll_max = 0;
         self.message_input_active = false;
         self.message_input.clear();
+        self.comment_input_active = false;
+        self.comment_input.clear();
     }
 
     pub fn selected_issue(&self) -> Option<&Issue> {
@@ -824,6 +830,46 @@ impl<A: LinearApi> App<A> {
     pub fn start_message_input(&mut self) {
         self.message_input_active = true;
         self.message_input.clear();
+    }
+
+    /// Activate the comment input bar for the current issue.
+    pub fn start_comment_input(&mut self) {
+        self.comment_input_active = true;
+        self.comment_input.clear();
+    }
+
+    /// Cancel comment input without sending.
+    pub fn cancel_comment_input(&mut self) {
+        self.comment_input_active = false;
+        self.comment_input.clear();
+    }
+
+    /// Submit the current comment input.
+    /// Returns the (issue_id, comment_body) pair for the caller to send via the API.
+    /// Returns `None` if the input is empty or no issue is selected.
+    pub fn submit_comment_input(&mut self) -> Option<(String, String)> {
+        self.comment_input_active = false;
+        let text = self.comment_input.trim().to_string();
+        if text.is_empty() {
+            self.comment_input.clear();
+            return None;
+        }
+
+        let issue_id = self.context_issue().map(|i| i.id.clone());
+        self.comment_input.clear();
+        issue_id.map(|id| (id, text))
+    }
+
+    /// Add a comment to the locally cached issue data for immediate display.
+    pub fn add_local_comment(&mut self, issue_id: &str, comment: crate::api::types::IssueComment) {
+        for issue in self.issues.iter_mut().chain(self.project_issues.iter_mut()) {
+            if issue.id == issue_id {
+                let comments = issue.comments.get_or_insert_with(|| {
+                    crate::api::types::IssueComments { nodes: Vec::new() }
+                });
+                comments.nodes.push(comment.clone());
+            }
+        }
     }
 
     /// Cancel message input without sending.
@@ -3514,6 +3560,83 @@ mod tests {
         app.message_input = "hello".to_string();
         let result = app.submit_message_input();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn start_comment_input_activates_and_clears() {
+        let mut app = app_with_issues();
+        app.comment_input = "leftover".to_string();
+        app.start_comment_input();
+        assert!(app.comment_input_active);
+        assert!(app.comment_input.is_empty());
+    }
+
+    #[test]
+    fn cancel_comment_input_deactivates() {
+        let mut app = app_with_issues();
+        app.start_comment_input();
+        app.comment_input.push_str("draft");
+        app.cancel_comment_input();
+        assert!(!app.comment_input_active);
+        assert!(app.comment_input.is_empty());
+    }
+
+    #[test]
+    fn submit_comment_input_returns_issue_and_text() {
+        let mut app = app_with_issues();
+        app.start_comment_input();
+        app.comment_input = "looks good".to_string();
+        let result = app.submit_comment_input();
+        assert!(!app.comment_input_active);
+        assert!(app.comment_input.is_empty());
+        let (issue_id, text) = result.unwrap();
+        assert_eq!(issue_id, "1");
+        assert_eq!(text, "looks good");
+    }
+
+    #[test]
+    fn submit_comment_input_empty_returns_none() {
+        let mut app = app_with_issues();
+        app.start_comment_input();
+        let result = app.submit_comment_input();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn submit_comment_input_whitespace_only_returns_none() {
+        let mut app = app_with_issues();
+        app.start_comment_input();
+        app.comment_input = "   ".to_string();
+        let result = app.submit_comment_input();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn add_local_comment_appends_to_issue() {
+        let mut app = app_with_issues();
+        let comment = crate::api::types::IssueComment {
+            body: "test comment".to_string(),
+            user: Some(crate::api::types::IssueUser {
+                name: "Alice".to_string(),
+            }),
+            created_at: "2025-01-01T00:00:00.000Z".to_string(),
+        };
+        app.add_local_comment("1", comment);
+        let issue = &app.issues[0];
+        let comments = issue.comments.as_ref().unwrap();
+        assert_eq!(comments.nodes.len(), 1);
+        assert_eq!(comments.nodes[0].body, "test comment");
+    }
+
+    #[test]
+    fn back_to_list_clears_comment_input() {
+        let mut app = app_with_issues();
+        app.select_issue();
+        app.start_comment_input();
+        app.comment_input.push_str("in progress");
+        app.back_to_list();
+        assert!(!app.comment_input_active);
+        assert!(app.comment_input.is_empty());
     }
 
     #[test]

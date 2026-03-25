@@ -22,6 +22,7 @@ pub enum Action {
     ChangeState,
     SendInstruction,
     Copy,
+    Comment,
 }
 
 pub fn map_key(key: KeyEvent) -> Option<Action> {
@@ -45,6 +46,7 @@ pub fn map_key(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Char('l')) => Some(Action::OpenRunLog),
         (_, KeyCode::Char('x')) => Some(Action::MarkRunStale),
         (_, KeyCode::Char('p')) => Some(Action::Projects),
+        (KeyModifiers::CONTROL, KeyCode::Char('m')) => Some(Action::Comment),
         (_, KeyCode::Char('m')) => Some(Action::ChangeState),
         (_, KeyCode::Char('i')) => Some(Action::SendInstruction),
         (_, KeyCode::Char('c')) => Some(Action::Copy),
@@ -196,6 +198,14 @@ mod tests {
         assert!(matches!(
             map_key(key(KeyCode::Char('i'))),
             Some(Action::SendInstruction)
+        ));
+    }
+
+    #[test]
+    fn comment_on_ctrl_m() {
+        assert!(matches!(
+            map_key(key_with(KeyCode::Char('m'), KeyModifiers::CONTROL)),
+            Some(Action::Comment)
         ));
     }
 

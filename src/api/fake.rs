@@ -128,6 +128,23 @@ impl LinearApi for FakeLinearApi {
         }
         Ok(state_name.to_string())
     }
+
+    async fn create_comment(
+        &self,
+        _issue_id: &str,
+        body: &str,
+    ) -> Result<super::types::IssueComment> {
+        if let Some(err_msg) = self.errors.lock().unwrap().pop_front() {
+            return Err(anyhow::anyhow!("{}", err_msg));
+        }
+        Ok(super::types::IssueComment {
+            body: body.to_string(),
+            user: Some(super::types::IssueUser {
+                name: "Test User".to_string(),
+            }),
+            created_at: "2025-01-01T00:00:00.000Z".to_string(),
+        })
+    }
 }
 
 #[cfg(test)]

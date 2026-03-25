@@ -35,6 +35,7 @@ pub const KEYBINDINGS: &[(&str, &str)] = &[
     ("a", "New Amp thread (detail)"),
     ("p", "Projects"),
     ("m", "Change issue state"),
+    ("Ctrl+m", "Add comment to issue (detail)"),
     ("c p", "Copy agent prompt to clipboard"),
 ];
 

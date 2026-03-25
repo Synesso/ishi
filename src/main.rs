@@ -75,6 +75,23 @@ fn reconcile_session_runs() -> Result<usize> {
     amp::reconcile::reconcile_state_file(&state_path)
 }
 
+/// Convert days since Unix epoch to (year, month, day).
+/// Uses a civil calendar algorithm.
+fn days_to_ymd(days: u64) -> (u64, u64, u64) {
+    // Algorithm from http://howardhinnant.github.io/date_algorithms.html
+    let z = days + 719468;
+    let era = z / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
+}
+
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -469,6 +486,58 @@ async fn main() -> Result<()> {
                         refresh_all(&mut app).await;
                     }
                     KeyCode::Char('q') => app.running = false,
+                    _ => {}
+                }
+            } else if app.comment_input_active {
+                match key.code {
+                    KeyCode::Enter => {
+                        if let Some((issue_id, body)) = app.submit_comment_input() {
+                            let api = app.api.clone();
+                            let tx = bg_tx.clone();
+                            let issue_id_clone = issue_id.clone();
+                            let body_clone = body.clone();
+                            tokio::spawn(async move {
+                                match api.create_comment(&issue_id_clone, &body_clone).await {
+                                    Ok(_) => {}
+                                    Err(err) => {
+                                        let _ = tx.send(BgMessage::Error(format!(
+                                            "Failed to add comment: {err}"
+                                        )));
+                                    }
+                                }
+                            });
+                            // Optimistic local update with current date
+                            let now = {
+                                let d = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default();
+                                // Format as ISO-8601 date only (enough for display)
+                                let secs = d.as_secs();
+                                let days = secs / 86400;
+                                // Approximate date from days since epoch
+                                let (y, m, d) = days_to_ymd(days);
+                                format!("{y:04}-{m:02}-{d:02}T00:00:00.000Z")
+                            };
+                            let comment = crate::api::types::IssueComment {
+                                body,
+                                user: Some(crate::api::types::IssueUser {
+                                    name: "You".to_string(),
+                                }),
+                                created_at: now,
+                            };
+                            app.add_local_comment(&issue_id, comment);
+                            app.flash = Some(("Comment added ✓".into(), 15));
+                            // Scroll to bottom so the new comment is visible
+                            app.detail_scroll = u16::MAX;
+                        }
+                    }
+                    KeyCode::Esc => app.cancel_comment_input(),
+                    KeyCode::Backspace => {
+                        app.comment_input.pop();
+                    }
+                    KeyCode::Char(c) => {
+                        app.comment_input.push(c);
+                    }
                     _ => {}
                 }
             } else if app.message_input_active {
@@ -892,6 +961,7 @@ async fn main() -> Result<()> {
                             }
                             keys::Action::Copy => app.awaiting_copy = true,
                             keys::Action::Help => app.toggle_help(),
+                            keys::Action::Comment => app.start_comment_input(),
                             _ => {}
                         },
                         app::DetailSection::Body => match action {
@@ -919,6 +989,7 @@ async fn main() -> Result<()> {
                                     }
                                 }
                             }
+                            keys::Action::Comment => app.start_comment_input(),
                             _ => {}
                         },
                     }

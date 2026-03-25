@@ -110,6 +110,18 @@ mutation($issueId: String!, $stateId: String!) {
 }
 "#;
 
+const CREATE_COMMENT_MUTATION: &str = r#"
+mutation($issueId: String!, $body: String!) {
+  commentCreate(input: { issueId: $issueId, body: $body }) {
+    comment {
+      body
+      user { name }
+      createdAt
+    }
+  }
+}
+"#;
+
 const PROJECT_ISSUES_QUERY: &str = r#"
 query($projectId: String!, $after: String) {
   project(id: $projectId) {
@@ -178,6 +190,12 @@ pub trait LinearApi: Send + Sync {
         issue_id: &str,
         state_name: &str,
     ) -> impl std::future::Future<Output = Result<String>> + Send;
+
+    fn create_comment(
+        &self,
+        issue_id: &str,
+        body: &str,
+    ) -> impl std::future::Future<Output = Result<super::types::IssueComment>> + Send;
 }
 
 #[derive(Clone)]
@@ -330,5 +348,17 @@ impl LinearApi for LinearClient {
             .unwrap_or(state_name)
             .to_string();
         Ok(new_state)
+    }
+
+    async fn create_comment(
+        &self,
+        issue_id: &str,
+        body: &str,
+    ) -> Result<super::types::IssueComment> {
+        let vars = serde_json::json!({ "issueId": issue_id, "body": body });
+        let resp = self.query(CREATE_COMMENT_MUTATION, Some(vars)).await?;
+        let comment = &resp["data"]["commentCreate"]["comment"];
+        let result: super::types::IssueComment = serde_json::from_value(comment.clone())?;
+        Ok(result)
     }
 }

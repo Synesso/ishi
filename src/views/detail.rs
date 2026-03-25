@@ -93,6 +93,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
     // Output section: show when viewing output, or when there's output for the selected thread
     let has_output = app.detail_section == DetailSection::Output;
     let input_bar_height: u16 = if app.message_input_active { 1 } else { 0 };
+    let comment_bar_height: u16 = if app.comment_input_active { 1 } else { 0 };
     let output_height: u16 = if has_output {
         // Take roughly half the remaining space
         let available = area
@@ -109,6 +110,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
     let chunks = Layout::vertical([
         Constraint::Length(meta_height),
         Constraint::Min(0),
+        Constraint::Length(comment_bar_height),
         Constraint::Length(output_height),
         Constraint::Length(input_bar_height),
         Constraint::Length(threads_height),
@@ -199,6 +201,16 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
     app.detail_scroll_max = detail_scroll_max;
     app.detail_scroll = scroll;
 
+    // Comment input bar
+    if app.comment_input_active {
+        let input_line = Line::from(vec![
+            Span::styled("💬 ", Style::default().fg(Color::Yellow)),
+            Span::raw(&app.comment_input),
+            Span::raw("▏"),
+        ]);
+        frame.render_widget(Paragraph::new(input_line), chunks[2]);
+    }
+
     // Output section
     if has_output {
         let output_display: Vec<Line> = app
@@ -213,7 +225,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
             .collect();
 
         let output_line_count = output_display.len() as u16;
-        let output_inner = chunks[2].height.saturating_sub(2);
+        let output_inner = chunks[3].height.saturating_sub(2);
         let output_scroll_max = output_line_count.saturating_sub(output_inner);
         let output_scroll = clamp_scroll(app.detail_output_scroll, output_scroll_max);
 
@@ -233,7 +245,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
             )
             .wrap(Wrap { trim: false })
             .scroll((output_scroll, 0));
-        frame.render_widget(output_block, chunks[2]);
+        frame.render_widget(output_block, chunks[3]);
         app.detail_output_scroll_max = output_scroll_max;
         app.detail_output_scroll = output_scroll;
     }
@@ -245,7 +257,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
             Span::raw(&app.message_input),
             Span::raw("▏"),
         ]);
-        frame.render_widget(Paragraph::new(input_line), chunks[3]);
+        frame.render_widget(Paragraph::new(input_line), chunks[4]);
     }
 
     // Threads section (always shown)
@@ -314,7 +326,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
                 .title(threads_title)
                 .border_style(threads_border_style),
         );
-        frame.render_widget(threads_block, chunks[4]);
+        frame.render_widget(threads_block, chunks[5]);
     }
 
     // Status bar
@@ -370,6 +382,13 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
             Span::styled("p", key_style),
             Span::raw("rompt"),
         ])
+    } else if app.comment_input_active {
+        Line::from(vec![
+            Span::styled("Enter", key_style),
+            Span::raw(" send  "),
+            Span::styled("Esc", key_style),
+            Span::raw(" cancel"),
+        ])
     } else if app.message_input_active {
         Line::from(vec![
             Span::styled("Enter", key_style),
@@ -419,6 +438,9 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
         spans.push(Span::styled("a", key_style));
         spans.push(Span::raw(" new thread"));
         spans.push(Span::raw("  "));
+        spans.push(Span::styled("^m", key_style));
+        spans.push(Span::raw(" comment"));
+        spans.push(Span::raw("  "));
         spans.push(Span::styled("c", key_style));
         spans.push(Span::raw(" copy"));
         Line::from(spans)
@@ -441,11 +463,14 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
         spans.push(Span::styled("a", key_style));
         spans.push(Span::raw(" new thread"));
         spans.push(Span::raw("  "));
+        spans.push(Span::styled("^m", key_style));
+        spans.push(Span::raw(" comment"));
+        spans.push(Span::raw("  "));
         spans.push(Span::styled("c", key_style));
         spans.push(Span::raw(" copy"));
         Line::from(spans)
     };
-    frame.render_widget(Paragraph::new(bar), chunks[5]);
+    frame.render_widget(Paragraph::new(bar), chunks[6]);
 
     // Workspace picker modal
     if let Some(ref picker) = app.workspace_picker {
