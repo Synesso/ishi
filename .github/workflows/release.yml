@@ -81,23 +81,21 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           git clone "https://x-access-token:${TAP_TOKEN}@github.com/synesso/homebrew-tap.git" tap
           mkdir -p tap/Formula
-          cat > tap/Formula/ishi.rb <<'FORMULA'
+          cat > tap/Formula/ishi.rb <<EOF
           class Ishi < Formula
             desc "TUI for managing Linear issues with Amp integration"
             homepage "https://github.com/synesso/ishi"
+            url "https://github.com/synesso/ishi/releases/download/${GITHUB_REF_NAME}/ishi-universal-apple-darwin.tar.gz"
+            sha256 "${{ steps.sha.outputs.sha256 }}"
+            version "${version}"
             license "MIT"
 
             def install
               bin.install "ishi"
             end
           end
-          FORMULA
+          EOF
           sed -i '' 's/^          //' tap/Formula/ishi.rb
-          # Insert url, sha256 and version after the homepage line
-          sed -i '' "/homepage/a\\
-            url \"https://github.com/synesso/ishi/releases/download/${GITHUB_REF_NAME}/ishi-universal-apple-darwin.tar.gz\"\\
-            sha256 \"${{ steps.sha.outputs.sha256 }}\"\\
-            version \"${version}\"" tap/Formula/ishi.rb
           cd tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
