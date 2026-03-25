@@ -20,12 +20,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         return;
     }
 
-    let show_bar = app.refreshing || app.awaiting_quit || app.awaiting_sort || app.error.is_some() || app.flash.is_some();
-    let chunks = if show_bar {
-        Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area)
-    } else {
-        Layout::vertical([Constraint::Min(0)]).split(area)
-    };
+    let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
 
     let header = Row::new(vec![
         Cell::from("Name").style(Style::default().add_modifier(Modifier::BOLD)),
@@ -80,53 +75,68 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         .fg(Color::Yellow)
         .add_modifier(Modifier::BOLD);
 
-    if show_bar {
-        if let Some(ref err) = app.error {
-            let line = Line::from(vec![
-                Span::styled(
-                    "Error: ",
-                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(&err.message, Style::default().fg(Color::Red)),
-                Span::styled(
-                    " (press Esc to dismiss)",
-                    Style::default().fg(Color::DarkGray),
-                ),
-            ]);
-            frame.render_widget(Paragraph::new(line), chunks[1]);
-        } else if app.awaiting_sort {
-            let sort_hints = vec![
-                Span::raw("sort by: "),
-                Span::styled("n", key_style),
-                Span::raw("ame  "),
-                Span::styled("s", key_style),
-                Span::raw("tatus  "),
-                Span::styled("l", key_style),
-                Span::raw("ead  "),
-                Span::styled("p", key_style),
-                Span::raw("rogress"),
-            ];
-            frame.render_widget(Paragraph::new(Line::from(sort_hints)), chunks[1]);
-        } else if app.refreshing {
-            let line = Line::from(Span::styled(
-                "Refreshing...",
-                Style::default().fg(Color::Yellow),
-            ));
-            frame.render_widget(Paragraph::new(line), chunks[1]);
-        } else if let Some((ref msg, _)) = app.flash {
-            let line = Line::from(Span::styled(
-                msg.as_str(),
-                Style::default().fg(Color::Green),
-            ));
-            frame.render_widget(Paragraph::new(line), chunks[1]);
-        } else if app.awaiting_quit {
-            let line = Line::from(vec![
-                Span::raw("Press "),
-                Span::styled("q", key_style),
-                Span::raw(" again to quit"),
-            ]);
-            frame.render_widget(Paragraph::new(line), chunks[1]);
-        }
+    if let Some(ref err) = app.error {
+        let line = Line::from(vec![
+            Span::styled(
+                "Error: ",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(&err.message, Style::default().fg(Color::Red)),
+            Span::styled(
+                " (press Esc to dismiss)",
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]);
+        frame.render_widget(Paragraph::new(line), chunks[1]);
+    } else if app.awaiting_sort {
+        let sort_hints = vec![
+            Span::raw("sort by: "),
+            Span::styled("n", key_style),
+            Span::raw("ame  "),
+            Span::styled("s", key_style),
+            Span::raw("tatus  "),
+            Span::styled("l", key_style),
+            Span::raw("ead  "),
+            Span::styled("p", key_style),
+            Span::raw("rogress"),
+        ];
+        frame.render_widget(Paragraph::new(Line::from(sort_hints)), chunks[1]);
+    } else if app.refreshing {
+        let line = Line::from(Span::styled(
+            "Refreshing...",
+            Style::default().fg(Color::Yellow),
+        ));
+        frame.render_widget(Paragraph::new(line), chunks[1]);
+    } else if let Some((ref msg, _)) = app.flash {
+        let line = Line::from(Span::styled(
+            msg.as_str(),
+            Style::default().fg(Color::Green),
+        ));
+        frame.render_widget(Paragraph::new(line), chunks[1]);
+    } else if app.awaiting_quit {
+        let line = Line::from(vec![
+            Span::raw("Press "),
+            Span::styled("q", key_style),
+            Span::raw(" again to quit"),
+        ]);
+        frame.render_widget(Paragraph::new(line), chunks[1]);
+    } else {
+        let sep = Span::styled(" │ ", Style::default().fg(Color::DarkGray));
+        let line = Line::from(vec![
+            Span::styled("s", key_style),
+            Span::raw("ort  "),
+            Span::styled("o", key_style),
+            Span::raw("pen  "),
+            Span::styled("r", key_style),
+            Span::raw("efresh"),
+            sep.clone(),
+            Span::styled("Esc", key_style),
+            Span::raw(" issues"),
+            sep,
+            Span::styled("?", key_style),
+            Span::raw("help"),
+        ]);
+        frame.render_widget(Paragraph::new(line), chunks[1]);
     }
 }
 

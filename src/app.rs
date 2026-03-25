@@ -1183,6 +1183,7 @@ mod tests {
                 assignee: None,
                 labels: None,
                 comments: None,
+                parent: None,
             },
             Issue {
                 id: "2".into(),
@@ -1196,6 +1197,7 @@ mod tests {
                 assignee: None,
                 labels: None,
                 comments: None,
+                parent: None,
             },
             Issue {
                 id: "3".into(),
@@ -1209,6 +1211,7 @@ mod tests {
                 assignee: None,
                 labels: None,
                 comments: None,
+                parent: None,
             },
         ];
         app
@@ -1435,6 +1438,7 @@ mod tests {
             assignee: None,
             labels: None,
             comments: None,
+            parent: None,
         }];
         assert_eq!(app.issues.len(), 1);
         assert_eq!(app.issues[0].identifier, "JEM-1");
@@ -1470,6 +1474,7 @@ mod tests {
                 assignee: None,
                 labels: None,
                 comments: None,
+                parent: None,
             },
             Issue {
                 id: "2".into(),
@@ -1483,6 +1488,7 @@ mod tests {
                 assignee: None,
                 labels: None,
                 comments: None,
+                parent: None,
             },
         ];
         app.selected = 1; // JEM-2 selected
@@ -1516,6 +1522,7 @@ mod tests {
                 assignee: None,
                 labels: None,
                 comments: None,
+                parent: None,
             },
             Issue {
                 id: "2".into(),
@@ -1529,6 +1536,7 @@ mod tests {
                 assignee: None,
                 labels: None,
                 comments: None,
+                parent: None,
             },
         ];
         app.selected = 1; // JEM-2 selected
@@ -1556,6 +1564,7 @@ mod tests {
             assignee: None,
             labels: None,
             comments: None,
+            parent: None,
         }];
         app.issues = original_issues.clone();
 
@@ -1906,6 +1915,7 @@ mod tests {
             assignee: None,
             labels: None,
             comments: None,
+            parent: None,
         }];
         app.back_from_project_detail();
         assert!(matches!(app.view, View::ProjectList));
@@ -1929,6 +1939,7 @@ mod tests {
                 assignee: None,
                 labels: None,
                 comments: None,
+                parent: None,
             },
             Issue {
                 id: "2".into(),
@@ -1942,6 +1953,7 @@ mod tests {
                 assignee: None,
                 labels: None,
                 comments: None,
+                parent: None,
             },
         ];
         assert_eq!(app.project_issue_selected, 0);
@@ -1971,6 +1983,7 @@ mod tests {
                 assignee: None,
                 labels: None,
                 comments: None,
+                parent: None,
             },
             Issue {
                 id: "2".into(),
@@ -1984,6 +1997,7 @@ mod tests {
                 assignee: None,
                 labels: None,
                 comments: None,
+                parent: None,
             },
             Issue {
                 id: "3".into(),
@@ -1997,6 +2011,7 @@ mod tests {
                 assignee: None,
                 labels: None,
                 comments: None,
+                parent: None,
             },
         ];
         app.project_issue_bottom();
@@ -2021,6 +2036,7 @@ mod tests {
                 assignee: None,
                 labels: None,
                 comments: None,
+                parent: None,
             },
             Issue {
                 id: "2".into(),
@@ -2034,6 +2050,7 @@ mod tests {
                 assignee: None,
                 labels: None,
                 comments: None,
+                parent: None,
             },
         ];
         app.project_issue_selected = 1;
@@ -2143,6 +2160,7 @@ mod tests {
                 assignee: None,
                 labels: None,
                 comments: None,
+                parent: None,
             },
             Issue {
                 id: "11".into(),
@@ -2156,6 +2174,7 @@ mod tests {
                 assignee: None,
                 labels: None,
                 comments: None,
+                parent: None,
             },
         ];
         app
@@ -2521,6 +2540,7 @@ mod tests {
             assignee: None,
             labels: None,
             comments: None,
+            parent: None,
         }];
         assert!(app.selected_issue_url().is_none());
     }
@@ -2877,6 +2897,7 @@ mod tests {
                 assignee: None,
                 labels: None,
                 comments: None,
+                parent: None,
             },
             Issue {
                 id: "2".into(),
@@ -2890,6 +2911,7 @@ mod tests {
                 assignee: None,
                 labels: None,
                 comments: None,
+                parent: None,
             },
         ];
         app.selected = 1;
@@ -3151,6 +3173,7 @@ mod tests {
             assignee: None,
             labels: None,
             comments: None,
+            parent: None,
         }];
         app.select_issue();
         app.detail_session_runs = vec![SessionRunSummary {

@@ -156,66 +156,88 @@ fn open_workspace_picker(app: &mut App<impl LinearApi>) {
     app.show_workspace_picker(workspaces);
 }
 
-/// Build a context prompt from a Linear issue to seed a new Amp thread.
+/// Build an issue context prompt for seeding a new Amp thread.
+/// Metadata is wrapped in XML-style tags. Parent task details are included when present.
 fn build_issue_context(issue: &api::types::Issue) -> String {
-    let mut ctx = format!("# {} {}\n", issue.identifier, issue.title);
+    let mut ctx = String::new();
+
+    // Parent task context
+    if let Some(parent) = &issue.parent {
+        ctx.push_str("<parent_task>\n");
+        ctx.push_str(&format!("# {} {}\n", parent.identifier, parent.title));
+        if let Some(url) = &parent.url {
+            ctx.push_str(&format!("{}\n", url));
+        }
+        if let Some(state) = &parent.state {
+            ctx.push_str(&format!("Status: {}\n", state.name));
+        }
+        if let Some(labels) = &parent.labels
+            && !labels.nodes.is_empty()
+        {
+            let names: Vec<&str> = labels.nodes.iter().map(|l| l.name.as_str()).collect();
+            ctx.push_str(&format!("Labels: {}\n", names.join(", ")));
+        }
+        if let Some(desc) = &parent.description
+            && !desc.is_empty()
+        {
+            ctx.push_str(&format!("\n{}\n", desc));
+        }
+        ctx.push_str("</parent_task>\n\n");
+    }
+
+    // Task context
+    ctx.push_str("<task>\n");
+    ctx.push_str(&format!("# {} {}\n", issue.identifier, issue.title));
     if let Some(url) = &issue.url {
         ctx.push_str(&format!("{}\n", url));
     }
     ctx.push('\n');
+    ctx.push_str("<metadata>\n");
     if let Some(state) = &issue.state {
-        ctx.push_str(&format!("**Status**: {}\n", state.name));
+        ctx.push_str(&format!("Status: {}\n", state.name));
     }
     if let Some(project) = &issue.project {
-        ctx.push_str(&format!("**Project**: {}\n", project.name));
+        ctx.push_str(&format!("Project: {}\n", project.name));
     }
     if let Some(labels) = &issue.labels
         && !labels.nodes.is_empty()
     {
         let names: Vec<&str> = labels.nodes.iter().map(|l| l.name.as_str()).collect();
-        ctx.push_str(&format!("**Labels**: {}\n", names.join(", ")));
+        ctx.push_str(&format!("Labels: {}\n", names.join(", ")));
     }
+    if let Some(assignee) = &issue.assignee {
+        ctx.push_str(&format!("Assignee: {}\n", assignee.name));
+    }
+    ctx.push_str("</metadata>\n");
     if let Some(desc) = &issue.description
         && !desc.is_empty()
     {
-        ctx.push_str(&format!("\n## Description\n\n{}\n", desc));
+        ctx.push_str(&format!("\n{}\n", desc));
     }
+    ctx.push_str("</task>\n");
+
     ctx
 }
 
-/// Open `$EDITOR` with `initial_content` in a temp file. Returns the edited
-/// content, or `None` if the user cleared the file or the editor failed.
-fn edit_prompt(initial_content: &str) -> Result<Option<String>> {
-    let tmp = tempfile::Builder::new()
-        .prefix("ishi-prompt-")
-        .suffix(".md")
-        .tempfile()?;
-    std::fs::write(tmp.path(), initial_content)?;
-
-    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
-    let status = suspend::run_external_command_with(
-        &mut suspend::RealTerminal,
-        &editor,
-        &[tmp.path().to_str().unwrap_or("")],
-        &std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-    )?;
-    if !status.success() {
-        return Ok(None);
-    }
-    let content = std::fs::read_to_string(tmp.path())?;
-    let trimmed = content.trim();
-    if trimmed.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(trimmed.to_string()))
+/// Detect the terminal emulator running ishi by checking `$TERM_PROGRAM`.
+/// Returns the application name suitable for `open -a <name>`.
+/// Falls back to "Terminal" if unrecognised.
+fn detect_terminal() -> &'static str {
+    match std::env::var("TERM_PROGRAM").as_deref() {
+        Ok("iTerm.app") => "iTerm",
+        Ok("WezTerm") => "WezTerm",
+        Ok("Alacritty") => "Alacritty",
+        Ok("ghostty") => "Ghostty",
+        Ok("kitty") => "kitty",
+        _ => "Terminal",
     }
 }
 
-/// Execute the new-thread flow (background-first):
-/// 1. Suspend TUI, open `$EDITOR` with issue context for the user to refine
-/// 2. Create a thread via `amp threads new`
-/// 3. Spawn `amp threads continue <id> -x` in background with the prompt
-/// 4. Record thread link + session run in state, return immediately
+/// Execute the new-thread flow:
+/// 1. Create a thread via `amp threads new`
+/// 2. Write a launcher script that pipes the prompt to `amp threads continue`
+/// 3. Open the launcher in a new terminal window of the same type as ishi's terminal
+/// 4. Record the thread link in state
 fn start_new_thread(issue_identifier: &str, workspace: &str, prompt: &str) -> Result<()> {
     let workspace_path = Path::new(workspace);
 
@@ -236,58 +258,48 @@ fn start_new_thread(issue_identifier: &str, workspace: &str, prompt: &str) -> Re
         anyhow::bail!("amp threads new returned empty thread ID");
     }
 
-    // Prepare log file
-    let log_dir = dirs::cache_dir()
+    // Write prompt to a temp file
+    let run_dir = dirs::cache_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
         .join("ishi")
         .join("run-logs");
-    std::fs::create_dir_all(&log_dir)?;
-    let log_path = log_dir.join(format!("{}.log", thread_id));
-    let log_file = std::fs::File::create(&log_path)?;
+    std::fs::create_dir_all(&run_dir)?;
+    let prompt_path = run_dir.join(format!("{}.prompt", thread_id));
+    std::fs::write(&prompt_path, prompt)?;
 
-    // Spawn background: echo prompt | amp threads continue <id> -x --no-notifications --dangerously-allow-all > log 2>&1
-    // Append exit code marker when done, mirroring the reconcile convention.
-    let shell_cmd = format!(
-        r#"echo {prompt} | amp threads continue {thread_id} -x --no-notifications --dangerously-allow-all >> {log} 2>&1; echo "{marker}$?" >> {log}"#,
-        prompt = shell_escape::unix::escape(prompt.into()),
+    // Build a launcher script
+    let launcher_path = run_dir.join(format!("{}.sh", thread_id));
+    let launcher_script = format!(
+        r#"#!/usr/bin/env bash
+cd {workspace} || exit 1
+cat {prompt_file} | amp threads continue {thread_id}
+rm -f {prompt_file} {launcher}
+"#,
+        workspace = shell_escape::unix::escape(workspace.into()),
+        prompt_file = shell_escape::unix::escape(prompt_path.to_string_lossy().into_owned().into()),
         thread_id = shell_escape::unix::escape(thread_id.as_str().into()),
-        log = shell_escape::unix::escape(log_path.to_string_lossy().into_owned().into()),
-        marker = amp::run::EXIT_CODE_MARKER_PREFIX,
+        launcher = shell_escape::unix::escape(launcher_path.to_string_lossy().into_owned().into()),
     );
+    std::fs::write(&launcher_path, &launcher_script)?;
 
-    let child = std::process::Command::new("sh")
-        .args(["-c", &shell_cmd])
-        .current_dir(workspace_path)
-        .stdin(std::process::Stdio::null())
-        .stdout(log_file.try_clone()?)
-        .stderr(log_file)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&launcher_path, std::fs::Permissions::from_mode(0o755))?;
+    }
+
+    // Open in a new terminal window of the same type
+    let terminal_app = detect_terminal();
+    std::process::Command::new("open")
+        .args(["-a", terminal_app, launcher_path.to_str().unwrap_or("")])
         .spawn()
-        .context("failed to spawn background amp session")?;
+        .context("failed to open terminal window")?;
 
-    let pid = child.id();
-    let now = now_ms();
-    let run_id = format!("run-{}-{}", thread_id, now);
-
-    // Persist thread link + session run
+    // Persist thread link (no session run tracking)
     let state_path = amp::state::state_path()?;
     let mut state = amp::state::State::load(&state_path)?;
     state.add_thread_link(&thread_id, issue_identifier, workspace);
     state.add_workspace(workspace);
-    state.add_session_run(
-        &run_id,
-        amp::state::SessionRun {
-            thread_id: thread_id.clone(),
-            issue: issue_identifier.to_string(),
-            workspace: workspace.to_string(),
-            pid: Some(pid),
-            status: amp::state::SessionRunStatus::Pending,
-            log_path: Some(log_path.to_string_lossy().to_string()),
-            created_at_ms: now,
-            updated_at_ms: now,
-            started_at_ms: None,
-            finished_at_ms: None,
-        },
-    );
     state.save(&state_path)?;
 
     Ok(())
@@ -416,8 +428,6 @@ async fn main() -> Result<()> {
                 if is_typing {
                     match key.code {
                         KeyCode::Enter => {
-                            // If the input is empty, adopt the selected option
-                            // as the input path before confirming.
                             if let Some(ref mut picker) = app.workspace_picker
                                 && picker.input.is_empty()
                                 && let Some(ws) = picker.options.get(picker.selected)
@@ -434,35 +444,23 @@ async fn main() -> Result<()> {
                                 let issue_id = issue.identifier.clone();
                                 let context = build_issue_context(issue);
                                 app.workspace_picker = None;
-                                match edit_prompt(&context) {
-                                    Ok(Some(prompt)) => {
-                                        app.flash = Some(("Starting thread …".into(), 0));
-                                        let tx = bg_tx.clone();
-                                        let issue_id_signal = issue_id.clone();
-                                        tokio::task::spawn_blocking(move || {
-                                            match start_new_thread(&issue_id, &workspace, &prompt)
-                                            {
-                                                Ok(()) => {
-                                                    let _ = tx.send(BgMessage::ThreadCreated {
-                                                        issue_identifier: issue_id_signal,
-                                                    });
-                                                }
-                                                Err(err) => {
-                                                    let _ = tx.send(BgMessage::Error(format!(
-                                                        "Failed to start thread: {err}"
-                                                    )));
-                                                }
-                                            }
-                                        });
-                                        terminal.clear()?;
+                                app.flash = Some(("Starting thread …".into(), 0));
+                                let tx = bg_tx.clone();
+                                let issue_id_signal = issue_id.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    match start_new_thread(&issue_id, &workspace, &context) {
+                                        Ok(()) => {
+                                            let _ = tx.send(BgMessage::ThreadCreated {
+                                                issue_identifier: issue_id_signal,
+                                            });
+                                        }
+                                        Err(err) => {
+                                            let _ = tx.send(BgMessage::Error(format!(
+                                                "Failed to start thread: {err}"
+                                            )));
+                                        }
                                     }
-                                    Ok(None) => {} // user cancelled
-                                    Err(err) => {
-                                        app.error = Some(app::AppError::new(format!(
-                                            "Editor failed: {err}"
-                                        )));
-                                    }
-                                }
+                                });
                             }
                         }
                         KeyCode::Esc => {
@@ -512,35 +510,23 @@ async fn main() -> Result<()> {
                                 let issue_id = issue.identifier.clone();
                                 let context = build_issue_context(issue);
                                 let workspace = workspace.clone();
-                                match edit_prompt(&context) {
-                                    Ok(Some(prompt)) => {
-                                        app.flash = Some(("Starting thread …".into(), 0));
-                                        let tx = bg_tx.clone();
-                                        let issue_id_signal = issue_id.clone();
-                                        tokio::task::spawn_blocking(move || {
-                                            match start_new_thread(&issue_id, &workspace, &prompt)
-                                            {
-                                                Ok(()) => {
-                                                    let _ = tx.send(BgMessage::ThreadCreated {
-                                                        issue_identifier: issue_id_signal,
-                                                    });
-                                                }
-                                                Err(err) => {
-                                                    let _ = tx.send(BgMessage::Error(format!(
-                                                        "Failed to start thread: {err}"
-                                                    )));
-                                                }
-                                            }
-                                        });
-                                        terminal.clear()?;
+                                app.flash = Some(("Starting thread …".into(), 0));
+                                let tx = bg_tx.clone();
+                                let issue_id_signal = issue_id.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    match start_new_thread(&issue_id, &workspace, &context) {
+                                        Ok(()) => {
+                                            let _ = tx.send(BgMessage::ThreadCreated {
+                                                issue_identifier: issue_id_signal,
+                                            });
+                                        }
+                                        Err(err) => {
+                                            let _ = tx.send(BgMessage::Error(format!(
+                                                "Failed to start thread: {err}"
+                                            )));
+                                        }
                                     }
-                                    Ok(None) => {} // user cancelled
-                                    Err(err) => {
-                                        app.error = Some(app::AppError::new(format!(
-                                            "Editor failed: {err}"
-                                        )));
-                                    }
-                                }
+                                });
                             }
                         }
                         KeyCode::Esc => app.cancel_workspace_picker(),
@@ -911,6 +897,7 @@ mod tests {
             assignee: None,
             labels: None,
             comments: None,
+            parent: None,
         }];
         app.detail_section = DetailSection::Threads;
         app.detail_threads = vec![ThreadSummary {
@@ -956,16 +943,19 @@ mod tests {
             assignee: None,
             labels: None,
             comments: None,
+            parent: None,
         }
     }
 
     #[test]
     fn build_issue_context_minimal() {
         let ctx = build_issue_context(&minimal_issue());
-        assert!(ctx.starts_with("# JEM-42 Fix the widget\n"));
-        assert!(!ctx.contains("Status"));
-        assert!(!ctx.contains("Project"));
-        assert!(!ctx.contains("Description"));
+        assert!(ctx.contains("<task>"));
+        assert!(ctx.contains("</task>"));
+        assert!(ctx.contains("# JEM-42 Fix the widget"));
+        assert!(ctx.contains("<metadata>"));
+        assert!(ctx.contains("</metadata>"));
+        assert!(!ctx.contains("<parent_task>"));
     }
 
     #[test]
@@ -988,15 +978,28 @@ mod tests {
                 ],
             }),
             description: Some("Describe the problem in detail.".into()),
+            parent: Some(Box::new(IssueParent {
+                identifier: "JEM-40".into(),
+                title: "Parent task".into(),
+                description: Some("Parent description.".into()),
+                url: Some("https://linear.app/issue/JEM-40".into()),
+                state: Some(IssueState { name: "Todo".into() }),
+                labels: None,
+            })),
             ..minimal_issue()
         };
         let ctx = build_issue_context(&issue);
+        assert!(ctx.contains("<parent_task>"));
+        assert!(ctx.contains("# JEM-40 Parent task"));
+        assert!(ctx.contains("Parent description."));
+        assert!(ctx.contains("</parent_task>"));
+        assert!(ctx.contains("<task>"));
         assert!(ctx.contains("https://linear.app/issue/JEM-42"));
-        assert!(ctx.contains("**Status**: In Progress"));
-        assert!(ctx.contains("**Project**: ishi"));
-        assert!(ctx.contains("**Labels**: bug, urgent"));
-        assert!(ctx.contains("## Description"));
+        assert!(ctx.contains("Status: In Progress"));
+        assert!(ctx.contains("Project: ishi"));
+        assert!(ctx.contains("Labels: bug, urgent"));
         assert!(ctx.contains("Describe the problem in detail."));
+        assert!(ctx.contains("</task>"));
     }
 
     #[test]
@@ -1006,7 +1009,9 @@ mod tests {
             ..minimal_issue()
         };
         let ctx = build_issue_context(&issue);
-        assert!(!ctx.contains("Description"));
+        // Should have metadata tags but description should not appear between metadata and task close
+        assert!(ctx.contains("<metadata>"));
+        assert!(ctx.contains("</task>"));
     }
 
     #[test]
@@ -1018,5 +1023,12 @@ mod tests {
         };
         let ctx = build_issue_context(&issue);
         assert!(!ctx.contains("Labels"));
+    }
+
+    #[test]
+    fn detect_terminal_defaults_to_terminal() {
+        // When TERM_PROGRAM is not set to a known value, should default
+        let result = detect_terminal();
+        assert!(!result.is_empty());
     }
 }

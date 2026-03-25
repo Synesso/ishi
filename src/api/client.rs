@@ -41,6 +41,14 @@ query($after: String) {
         assignee { name }
         labels { nodes { name } }
         comments { nodes { body user { name } createdAt } }
+        parent {
+          identifier
+          title
+          description
+          url
+          state { name }
+          labels { nodes { name } }
+        }
       }
     }
   }
@@ -123,6 +131,14 @@ query($projectId: String!, $after: String) {
         assignee { name }
         labels { nodes { name } }
         comments { nodes { body user { name } createdAt } }
+        parent {
+          identifier
+          title
+          description
+          url
+          state { name }
+          labels { nodes { name } }
+        }
       }
     }
   }

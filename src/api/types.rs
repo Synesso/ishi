@@ -1,6 +1,16 @@
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct IssueParent {
+    pub identifier: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub url: Option<String>,
+    pub state: Option<IssueState>,
+    pub labels: Option<IssueLabels>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct Issue {
     pub id: String,
     pub identifier: String,
@@ -13,6 +23,7 @@ pub struct Issue {
     pub assignee: Option<IssueUser>,
     pub labels: Option<IssueLabels>,
     pub comments: Option<IssueComments>,
+    pub parent: Option<Box<IssueParent>>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
