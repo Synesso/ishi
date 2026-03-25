@@ -262,6 +262,8 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
             Span::styled("/", key_style),
             Span::raw("search"),
             sep.clone(),
+            Span::styled("c", key_style),
+            Span::raw("reate  "),
             Span::styled("a", key_style),
             Span::raw("mp  "),
             Span::styled("p", key_style),

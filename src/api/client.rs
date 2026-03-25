@@ -122,6 +122,51 @@ mutation($issueId: String!, $body: String!) {
 }
 "#;
 
+const CREATE_ISSUE_MUTATION: &str = r#"
+mutation($teamId: String!, $title: String!, $projectId: String, $priority: Int, $description: String, $assigneeId: String) {
+  issueCreate(input: { teamId: $teamId, title: $title, projectId: $projectId, priority: $priority, description: $description, assigneeId: $assigneeId }) {
+    issue {
+      id
+      identifier
+      title
+      url
+      state { name }
+      priority
+      project { name description }
+      description
+      assignee { name }
+      labels { nodes { name } }
+      comments { nodes { body user { name } createdAt } }
+      parent {
+        identifier
+        title
+        description
+        url
+        state { name }
+        labels { nodes { name } }
+      }
+      team { name }
+    }
+  }
+}
+"#;
+
+const VIEWER_TEAM_QUERY: &str = r#"
+query {
+  viewer {
+    id
+    teamMemberships {
+      nodes {
+        team {
+          id
+          name
+        }
+      }
+    }
+  }
+}
+"#;
+
 const PROJECT_ISSUES_QUERY: &str = r#"
 query($projectId: String!, $after: String) {
   project(id: $projectId) {
@@ -196,6 +241,22 @@ pub trait LinearApi: Send + Sync {
         issue_id: &str,
         body: &str,
     ) -> impl std::future::Future<Output = Result<super::types::IssueComment>> + Send;
+
+    fn create_issue(
+        &self,
+        team_id: &str,
+        title: &str,
+        project_id: Option<&str>,
+        priority: Option<i32>,
+        description: Option<&str>,
+        assignee_id: Option<&str>,
+    ) -> impl std::future::Future<Output = Result<Issue>> + Send;
+
+    /// Fetch the viewer's ID and team memberships.
+    /// Returns (viewer_id, vec of (team_id, team_name)).
+    fn fetch_viewer_teams(
+        &self,
+    ) -> impl std::future::Future<Output = Result<(String, Vec<(String, String)>)>> + Send;
 }
 
 #[derive(Clone)]
@@ -360,5 +421,48 @@ impl LinearApi for LinearClient {
         let comment = &resp["data"]["commentCreate"]["comment"];
         let result: super::types::IssueComment = serde_json::from_value(comment.clone())?;
         Ok(result)
+    }
+
+    async fn create_issue(
+        &self,
+        team_id: &str,
+        title: &str,
+        project_id: Option<&str>,
+        priority: Option<i32>,
+        description: Option<&str>,
+        assignee_id: Option<&str>,
+    ) -> Result<Issue> {
+        let vars = serde_json::json!({
+            "teamId": team_id,
+            "title": title,
+            "projectId": project_id,
+            "priority": priority,
+            "description": description,
+            "assigneeId": assignee_id,
+        });
+        let resp = self.query(CREATE_ISSUE_MUTATION, Some(vars)).await?;
+        let issue = &resp["data"]["issueCreate"]["issue"];
+        let result: Issue = serde_json::from_value(issue.clone())?;
+        Ok(result)
+    }
+
+    async fn fetch_viewer_teams(&self) -> Result<(String, Vec<(String, String)>)> {
+        let resp = self.query(VIEWER_TEAM_QUERY, None).await?;
+        let viewer_id = resp["data"]["viewer"]["id"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("failed to fetch viewer ID"))?
+            .to_string();
+        let mut teams: Vec<(String, String)> = Vec::new();
+        if let Some(memberships) = resp["data"]["viewer"]["teamMemberships"]["nodes"].as_array() {
+            for membership in memberships {
+                if let (Some(id), Some(name)) = (
+                    membership["team"]["id"].as_str(),
+                    membership["team"]["name"].as_str(),
+                ) {
+                    teams.push((id.to_string(), name.to_string()));
+                }
+            }
+        }
+        Ok((viewer_id, teams))
     }
 }

@@ -23,6 +23,7 @@ use tokio::sync::mpsc;
 enum BgMessage {
     Error(String),
     ThreadCreated { issue_identifier: String },
+    IssueCreated(crate::api::types::Issue),
 }
 
 enum RunManagementAction {
@@ -431,6 +432,12 @@ async fn main() -> Result<()> {
                         load_threads_for_issue(&mut app, &issue_identifier);
                     }
                 }
+                BgMessage::IssueCreated(issue) => {
+                    let identifier = issue.identifier.clone();
+                    app.issues.insert(0, issue);
+                    app.cache.invalidate(app::CACHE_KEY_MY_ISSUES);
+                    app.flash = Some((format!("{} created ✓", identifier), 30));
+                }
             }
         }
 
@@ -464,6 +471,9 @@ async fn main() -> Result<()> {
                 app::View::Detail => views::detail::render(frame, area, &mut app),
                 app::View::ProjectList => views::project_list::render(frame, area, &app),
                 app::View::ProjectDetail => views::project::render(frame, area, &app),
+            }
+            if let Some(ref form) = app.create_issue_form {
+                views::create_issue::render(frame, area, form);
             }
             if app.show_help {
                 views::help::render(frame, area);
@@ -538,6 +548,146 @@ async fn main() -> Result<()> {
                     KeyCode::Char(c) => {
                         app.comment_input.push(c);
                     }
+                    _ => {}
+                }
+            } else if app.create_issue_form.is_some() {
+                let focus = app.create_issue_form.as_ref().unwrap().focus;
+                match key.code {
+                    KeyCode::Esc => app.cancel_create_issue_form(),
+                    KeyCode::Tab => {
+                        if let Some(ref mut form) = app.create_issue_form {
+                            form.focus_next();
+                        }
+                    }
+                    KeyCode::BackTab => {
+                        if let Some(ref mut form) = app.create_issue_form {
+                            form.focus_prev();
+                        }
+                    }
+                    KeyCode::Enter => {
+                        if focus == app::CreateIssueField::Description {
+                            if let Some(ref mut form) = app.create_issue_form {
+                                form.description.push('\n');
+                            }
+                        } else if focus == app::CreateIssueField::AssignToMe {
+                            if let Some(ref mut form) = app.create_issue_form {
+                                form.toggle_assign_to_me();
+                            }
+                        } else if focus == app::CreateIssueField::Submit {
+                            if let Some(req) = app.submit_create_issue_form() {
+                            let api = app.api.clone();
+                            let tx = bg_tx.clone();
+                            tokio::spawn(async move {
+                                match api
+                                    .create_issue(
+                                        &req.team_id,
+                                        &req.title,
+                                        req.project_id.as_deref(),
+                                        req.priority,
+                                        req.description.as_deref(),
+                                        req.assignee_id.as_deref(),
+                                    )
+                                    .await
+                                {
+                                    Ok(issue) => {
+                                        let _ = tx.send(BgMessage::IssueCreated(issue));
+                                    }
+                                    Err(err) => {
+                                        let _ = tx.send(BgMessage::Error(format!(
+                                            "Failed to create issue: {err}"
+                                        )));
+                                    }
+                                }
+                            });
+                            app.flash = Some(("Creating issue …".into(), 0));
+                            }
+                        }
+                    }
+                    KeyCode::Backspace => match focus {
+                        app::CreateIssueField::Title => {
+                            if let Some(ref mut form) = app.create_issue_form {
+                                form.title.pop();
+                            }
+                        }
+                        app::CreateIssueField::Description => {
+                            if let Some(ref mut form) = app.create_issue_form {
+                                form.description.pop();
+                            }
+                        }
+                        app::CreateIssueField::Team => {
+                            if let Some(ref mut form) = app.create_issue_form {
+                                form.team_type_ahead_pop();
+                            }
+                        }
+                        app::CreateIssueField::Project => {
+                            if let Some(ref mut form) = app.create_issue_form {
+                                form.project_type_ahead_pop();
+                            }
+                        }
+                        _ => {}
+                    },
+                    KeyCode::Down if focus == app::CreateIssueField::Team => {
+                        if let Some(ref mut form) = app.create_issue_form {
+                            form.team_move_down();
+                        }
+                    }
+                    KeyCode::Up if focus == app::CreateIssueField::Team => {
+                        if let Some(ref mut form) = app.create_issue_form {
+                            form.team_move_up();
+                        }
+                    }
+                    KeyCode::Down if focus == app::CreateIssueField::Project => {
+                        if let Some(ref mut form) = app.create_issue_form {
+                            form.project_move_down();
+                        }
+                    }
+                    KeyCode::Up if focus == app::CreateIssueField::Project => {
+                        if let Some(ref mut form) = app.create_issue_form {
+                            form.project_move_up();
+                        }
+                    }
+                    KeyCode::Right | KeyCode::Char('l')
+                        if focus == app::CreateIssueField::Priority =>
+                    {
+                        if let Some(ref mut form) = app.create_issue_form {
+                            form.priority_next();
+                        }
+                    }
+                    KeyCode::Left | KeyCode::Char('h')
+                        if focus == app::CreateIssueField::Priority =>
+                    {
+                        if let Some(ref mut form) = app.create_issue_form {
+                            form.priority_prev();
+                        }
+                    }
+                    KeyCode::Char(c) => match focus {
+                        app::CreateIssueField::Title => {
+                            if let Some(ref mut form) = app.create_issue_form {
+                                form.title.push(c);
+                            }
+                        }
+                        app::CreateIssueField::Description => {
+                            if let Some(ref mut form) = app.create_issue_form {
+                                form.description.push(c);
+                            }
+                        }
+                        app::CreateIssueField::Team => {
+                            if let Some(ref mut form) = app.create_issue_form {
+                                form.team_type_ahead_push(c);
+                            }
+                        }
+                        app::CreateIssueField::Project => {
+                            if let Some(ref mut form) = app.create_issue_form {
+                                form.project_type_ahead_push(c);
+                            }
+                        }
+                        app::CreateIssueField::AssignToMe if c == ' ' => {
+                            if let Some(ref mut form) = app.create_issue_form {
+                                form.toggle_assign_to_me();
+                            }
+                        }
+                        _ => {}
+                    },
                     _ => {}
                 }
             } else if app.message_input_active {
@@ -871,6 +1021,24 @@ async fn main() -> Result<()> {
                                 }
                             }
                         }
+                        keys::Action::Copy => {
+                            app.load_projects().await;
+                            match app.api.fetch_viewer_teams().await {
+                                Ok((viewer_id, teams)) => {
+                                    let projects: Vec<(String, String)> = app
+                                        .projects
+                                        .iter()
+                                        .map(|p| (p.id.clone(), p.name.clone()))
+                                        .collect();
+                                    app.open_create_issue_form(viewer_id, &teams, &projects);
+                                }
+                                Err(err) => {
+                                    app.error = Some(app::AppError::new(format!(
+                                        "Failed to fetch teams: {err}"
+                                    )));
+                                }
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -1043,6 +1211,24 @@ async fn main() -> Result<()> {
                                     app.error =
                                         Some(app::AppError::new(format!("Failed to fetch states: {err}")));
                                 }
+                            }
+                        }
+                    }
+                    keys::Action::Copy => {
+                        app.load_projects().await;
+                        match app.api.fetch_viewer_teams().await {
+                           Ok((viewer_id, teams)) => {
+                               let projects: Vec<(String, String)> = app
+                                   .projects
+                                   .iter()
+                                   .map(|p| (p.id.clone(), p.name.clone()))
+                                   .collect();
+                               app.open_create_issue_form(viewer_id, &teams, &projects);
+                           }
+                            Err(err) => {
+                                app.error = Some(app::AppError::new(format!(
+                                    "Failed to fetch teams: {err}"
+                                )));
                             }
                         }
                     }

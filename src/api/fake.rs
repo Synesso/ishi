@@ -145,6 +145,47 @@ impl LinearApi for FakeLinearApi {
             created_at: "2025-01-01T00:00:00.000Z".to_string(),
         })
     }
+
+    async fn create_issue(
+        &self,
+        _team_id: &str,
+        title: &str,
+        _project_id: Option<&str>,
+        _priority: Option<i32>,
+        description: Option<&str>,
+        _assignee_id: Option<&str>,
+    ) -> Result<Issue> {
+        if let Some(err_msg) = self.errors.lock().unwrap().pop_front() {
+            return Err(anyhow::anyhow!("{}", err_msg));
+        }
+        Ok(Issue {
+            id: "new-id".to_string(),
+            identifier: "JEM-99".to_string(),
+            title: title.to_string(),
+            url: None,
+            state: Some(super::types::IssueState {
+                name: "Backlog".to_string(),
+            }),
+            priority: None,
+            project: None,
+            description: description.map(|d| d.to_string()),
+            assignee: None,
+            labels: None,
+            comments: None,
+            parent: None,
+            team: None,
+        })
+    }
+
+    async fn fetch_viewer_teams(&self) -> Result<(String, Vec<(String, String)>)> {
+        if let Some(err_msg) = self.errors.lock().unwrap().pop_front() {
+            return Err(anyhow::anyhow!("{}", err_msg));
+        }
+        Ok((
+            "viewer-1".to_string(),
+            vec![("team-1".to_string(), "Jem".to_string())],
+        ))
+    }
 }
 
 #[cfg(test)]

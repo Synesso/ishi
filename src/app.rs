@@ -48,7 +48,7 @@ fn pick_display_status(a: SessionRunStatus, b: SessionRunStatus) -> SessionRunSt
 }
 
 const CACHE_TTL_SECS: u64 = 300; // 5 minutes
-const CACHE_KEY_MY_ISSUES: &str = "my_issues";
+pub const CACHE_KEY_MY_ISSUES: &str = "my_issues";
 const CACHE_KEY_PROJECTS: &str = "projects";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -267,6 +267,342 @@ impl SortDirection {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreateIssueField {
+    Title,
+    Team,
+    Project,
+    Priority,
+    AssignToMe,
+    Description,
+    Submit,
+}
+
+impl CreateIssueField {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Title => Self::Team,
+            Self::Team => Self::Project,
+            Self::Project => Self::Priority,
+            Self::Priority => Self::AssignToMe,
+            Self::AssignToMe => Self::Description,
+            Self::Description => Self::Submit,
+            Self::Submit => Self::Title,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Title => Self::Submit,
+            Self::Team => Self::Title,
+            Self::Project => Self::Team,
+            Self::Priority => Self::Project,
+            Self::AssignToMe => Self::Priority,
+            Self::Description => Self::AssignToMe,
+            Self::Submit => Self::Description,
+        }
+    }
+
+    /// Whether this field is a picker that supports type-ahead filtering.
+    pub fn is_picker(self) -> bool {
+        matches!(self, Self::Team | Self::Project)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IssuePriority {
+    None,
+    Urgent,
+    High,
+    Medium,
+    Low,
+}
+
+impl IssuePriority {
+    pub const ALL: &[IssuePriority] = &[
+        Self::None,
+        Self::Urgent,
+        Self::High,
+        Self::Medium,
+        Self::Low,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::Urgent => "Urgent",
+            Self::High => "High",
+            Self::Medium => "Medium",
+            Self::Low => "Low",
+        }
+    }
+
+    pub fn api_value(self) -> Option<i32> {
+        match self {
+            Self::None => None,
+            Self::Urgent => Some(1),
+            Self::High => Some(2),
+            Self::Medium => Some(3),
+            Self::Low => Some(4),
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::None => Self::Urgent,
+            Self::Urgent => Self::High,
+            Self::High => Self::Medium,
+            Self::Medium => Self::Low,
+            Self::Low => Self::None,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::None => Self::Low,
+            Self::Urgent => Self::None,
+            Self::High => Self::Urgent,
+            Self::Medium => Self::High,
+            Self::Low => Self::Medium,
+        }
+    }
+}
+
+/// Request data extracted from the create-issue form on submit.
+pub struct CreateIssueRequest {
+    pub team_id: String,
+    pub title: String,
+    pub project_id: Option<String>,
+    pub priority: Option<i32>,
+    pub description: Option<String>,
+    pub assignee_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateIssueForm {
+    pub title: String,
+    /// (team_id, team_name) — sorted alphabetically.
+    pub team_options: Vec<(String, String)>,
+    pub team_selected: usize,
+    pub team_type_ahead: String,
+    /// (project_id, project_name) — first entry is ("", "None")
+    pub project_options: Vec<(String, String)>,
+    pub project_selected: usize,
+    pub project_type_ahead: String,
+    pub priority: IssuePriority,
+    pub assign_to_me: bool,
+    pub viewer_id: String,
+    pub description: String,
+    pub focus: CreateIssueField,
+}
+
+/// Sort a list of (id, name) pairs alphabetically by name (case-insensitive).
+fn sort_options(opts: &mut [(String, String)]) {
+    opts.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+}
+
+/// Filter options by a type-ahead needle (case-insensitive contains).
+fn filter_options<'a>(
+    options: &'a [(String, String)],
+    needle: &str,
+) -> Vec<(usize, &'a (String, String))> {
+    if needle.is_empty() {
+        return options.iter().enumerate().collect();
+    }
+    let lower = needle.to_lowercase();
+    options
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, name))| name.to_lowercase().contains(&lower))
+        .collect()
+}
+
+/// Compute new selection after moving down in a filtered list.
+fn picker_move_down_idx(current: usize, filtered: &[(usize, &(String, String))]) -> usize {
+    if let Some(pos) = filtered.iter().position(|(idx, _)| *idx == current) {
+        if pos + 1 < filtered.len() {
+            return filtered[pos + 1].0;
+        }
+    } else if let Some(&(idx, _)) = filtered.first() {
+        return idx;
+    }
+    current
+}
+
+/// Compute new selection after moving up in a filtered list.
+fn picker_move_up_idx(current: usize, filtered: &[(usize, &(String, String))]) -> usize {
+    if let Some(pos) = filtered.iter().position(|(idx, _)| *idx == current) {
+        if pos > 0 {
+            return filtered[pos - 1].0;
+        }
+    } else if let Some(&(idx, _)) = filtered.first() {
+        return idx;
+    }
+    current
+}
+
+/// Compute the snapped selection for the first item in a filtered list.
+fn picker_snap_idx(current: usize, filtered: &[(usize, &(String, String))]) -> usize {
+    filtered.first().map(|&(idx, _)| idx).unwrap_or(current)
+}
+
+impl CreateIssueForm {
+    pub fn new(
+        viewer_id: String,
+        teams: &[(String, String)],
+        projects: &[(String, String)],
+        preselect_project_id: Option<&str>,
+        assign_to_me: bool,
+    ) -> Self {
+        let mut sorted_teams: Vec<(String, String)> = teams.to_vec();
+        sort_options(&mut sorted_teams);
+
+        let mut project_options: Vec<(String, String)> = vec![("".into(), "None".into())];
+        let mut sorted_projects: Vec<(String, String)> = projects.to_vec();
+        sort_options(&mut sorted_projects);
+        project_options.extend(sorted_projects);
+
+        let project_selected = preselect_project_id
+            .and_then(|id| project_options.iter().position(|(pid, _)| pid == id))
+            .unwrap_or(0);
+
+        Self {
+            title: String::new(),
+            team_options: sorted_teams,
+            team_selected: 0,
+            team_type_ahead: String::new(),
+            project_options,
+            project_selected,
+            project_type_ahead: String::new(),
+            priority: IssuePriority::None,
+            assign_to_me,
+            viewer_id,
+            description: String::new(),
+            focus: CreateIssueField::Title,
+        }
+    }
+
+    pub fn toggle_assign_to_me(&mut self) {
+        self.assign_to_me = !self.assign_to_me;
+    }
+
+    pub fn focus_next(&mut self) {
+        self.focus = self.focus.next();
+        self.clear_inactive_type_ahead();
+    }
+
+    pub fn focus_prev(&mut self) {
+        self.focus = self.focus.prev();
+        self.clear_inactive_type_ahead();
+    }
+
+    fn clear_inactive_type_ahead(&mut self) {
+        if self.focus != CreateIssueField::Team {
+            self.team_type_ahead.clear();
+        }
+        if self.focus != CreateIssueField::Project {
+            self.project_type_ahead.clear();
+        }
+    }
+
+    // --- Team picker ---
+
+    pub fn filtered_team_options(&self) -> Vec<(usize, &(String, String))> {
+        filter_options(&self.team_options, &self.team_type_ahead)
+    }
+
+    pub fn team_move_down(&mut self) {
+        let filtered = self.filtered_team_options();
+        self.team_selected = picker_move_down_idx(self.team_selected, &filtered);
+    }
+
+    pub fn team_move_up(&mut self) {
+        let filtered = self.filtered_team_options();
+        self.team_selected = picker_move_up_idx(self.team_selected, &filtered);
+    }
+
+    pub fn team_type_ahead_push(&mut self, c: char) {
+        self.team_type_ahead.push(c);
+        let filtered = self.filtered_team_options();
+        self.team_selected = picker_snap_idx(self.team_selected, &filtered);
+    }
+
+    pub fn team_type_ahead_pop(&mut self) {
+        self.team_type_ahead.pop();
+        if !self.team_type_ahead.is_empty() {
+            let filtered = self.filtered_team_options();
+            self.team_selected = picker_snap_idx(self.team_selected, &filtered);
+        }
+    }
+
+    pub fn selected_team_id(&self) -> Option<&str> {
+        self.team_options
+            .get(self.team_selected)
+            .map(|(id, _)| id.as_str())
+    }
+
+    pub fn selected_team_name(&self) -> &str {
+        self.team_options
+            .get(self.team_selected)
+            .map(|(_, name)| name.as_str())
+            .unwrap_or("—")
+    }
+
+    // --- Project picker ---
+
+    pub fn filtered_project_options(&self) -> Vec<(usize, &(String, String))> {
+        filter_options(&self.project_options, &self.project_type_ahead)
+    }
+
+    pub fn project_move_down(&mut self) {
+        let filtered = self.filtered_project_options();
+        self.project_selected = picker_move_down_idx(self.project_selected, &filtered);
+    }
+
+    pub fn project_move_up(&mut self) {
+        let filtered = self.filtered_project_options();
+        self.project_selected = picker_move_up_idx(self.project_selected, &filtered);
+    }
+
+    pub fn project_type_ahead_push(&mut self, c: char) {
+        self.project_type_ahead.push(c);
+        let filtered = self.filtered_project_options();
+        self.project_selected = picker_snap_idx(self.project_selected, &filtered);
+    }
+
+    pub fn project_type_ahead_pop(&mut self) {
+        self.project_type_ahead.pop();
+        if !self.project_type_ahead.is_empty() {
+            let filtered = self.filtered_project_options();
+            self.project_selected = picker_snap_idx(self.project_selected, &filtered);
+        }
+    }
+
+    pub fn selected_project_id(&self) -> Option<&str> {
+        self.project_options
+            .get(self.project_selected)
+            .map(|(id, _)| id.as_str())
+            .filter(|id| !id.is_empty())
+    }
+
+    pub fn selected_project_name(&self) -> &str {
+        self.project_options
+            .get(self.project_selected)
+            .map(|(_, name)| name.as_str())
+            .unwrap_or("None")
+    }
+
+    // --- Priority ---
+
+    pub fn priority_next(&mut self) {
+        self.priority = self.priority.next();
+    }
+
+    pub fn priority_prev(&mut self) {
+        self.priority = self.priority.prev();
+    }
+}
+
 /// User-friendly error message displayed in the status bar.
 #[derive(Debug, Clone)]
 pub struct AppError {
@@ -362,6 +698,9 @@ pub struct App<A: LinearApi> {
     /// Per-issue thread counts: issue identifier → (active, total).
     /// Active means Running or Pending session runs.
     pub thread_counts: HashMap<String, (usize, usize)>,
+    pub create_issue_form: Option<CreateIssueForm>,
+    /// Remembered assign-to-me preference across form opens (initially true).
+    pub create_issue_assign_to_me: bool,
 }
 
 impl<A: LinearApi> App<A> {
@@ -421,6 +760,8 @@ impl<A: LinearApi> App<A> {
             detail_origin: DetailOrigin::MyIssues,
             flash: None,
             thread_counts: HashMap::new(),
+            create_issue_form: None,
+            create_issue_assign_to_me: true,
         }
     }
 
@@ -907,6 +1248,66 @@ impl<A: LinearApi> App<A> {
 
     pub fn cancel_workspace_picker(&mut self) {
         self.workspace_picker = None;
+    }
+
+    /// Open the create-issue form modal.
+    pub fn open_create_issue_form(
+        &mut self,
+        viewer_id: String,
+        teams: &[(String, String)],
+        projects: &[(String, String)],
+    ) {
+        if teams.is_empty() {
+            return;
+        }
+        let preselect = match self.view {
+            View::ProjectDetail => self.selected_project().map(|p| p.id.as_str()),
+            _ => None,
+        };
+        self.create_issue_form = Some(CreateIssueForm::new(
+            viewer_id,
+            teams,
+            projects,
+            preselect,
+            self.create_issue_assign_to_me,
+        ));
+    }
+
+    /// Cancel the create-issue form.
+    pub fn cancel_create_issue_form(&mut self) {
+        self.create_issue_form = None;
+    }
+
+    /// Submit the create-issue form. Returns the request data, or None if invalid.
+    pub fn submit_create_issue_form(&mut self) -> Option<CreateIssueRequest> {
+        let form = self.create_issue_form.take()?;
+        let title = form.title.trim().to_string();
+        let team_id = form.selected_team_id().map(|s| s.to_string());
+        if title.is_empty() || team_id.is_none() {
+            self.create_issue_form = Some(form);
+            return None;
+        }
+        // Remember the assign-to-me preference for next time.
+        self.create_issue_assign_to_me = form.assign_to_me;
+        let assignee_id = if form.assign_to_me {
+            Some(form.viewer_id.clone())
+        } else {
+            None
+        };
+        let project_id = form.selected_project_id().map(|s| s.to_string());
+        let priority = form.priority.api_value();
+        let description = {
+            let d = form.description.trim().to_string();
+            if d.is_empty() { None } else { Some(d) }
+        };
+        Some(CreateIssueRequest {
+            team_id: team_id.unwrap(),
+            title,
+            project_id,
+            priority,
+            description,
+            assignee_id,
+        })
     }
 
     pub fn toggle_help(&mut self) {
@@ -3787,5 +4188,277 @@ mod tests {
         let mut ids = vec!["FOO-223", "BAR-555", "FOO-36", "BAR-99"];
         ids.sort_by(|a, b| cmp_identifier(a, b));
         assert_eq!(ids, vec!["BAR-99", "BAR-555", "FOO-36", "FOO-223"]);
+    }
+
+    fn test_teams() -> Vec<(String, String)> {
+        vec![("t1".into(), "Jem".into()), ("t2".into(), "Core".into())]
+    }
+
+    #[test]
+    fn create_issue_form_opens_with_defaults() {
+        let mut app = app_with_issues();
+        let projects = vec![("p1".into(), "Beta".into()), ("p2".into(), "Alpha".into())];
+        app.open_create_issue_form("v".into(), &test_teams(), &projects);
+
+        let form = app.create_issue_form.as_ref().unwrap();
+        assert!(form.title.is_empty());
+        assert_eq!(form.focus, CreateIssueField::Title);
+        assert_eq!(form.priority, IssuePriority::None);
+        // Teams sorted: Core, Jem
+        assert_eq!(form.team_options[0].1, "Core");
+        assert_eq!(form.team_options[1].1, "Jem");
+        // Projects sorted: None, Alpha, Beta
+        assert_eq!(form.project_options[0].1, "None");
+        assert_eq!(form.project_options[1].1, "Alpha");
+        assert_eq!(form.project_options[2].1, "Beta");
+        assert_eq!(form.project_selected, 0); // None selected
+    }
+
+    #[test]
+    fn create_issue_form_no_teams_does_nothing() {
+        let mut app = app_with_issues();
+        app.open_create_issue_form("v".into(), &[], &[]);
+        assert!(app.create_issue_form.is_none());
+    }
+
+    #[test]
+    fn create_issue_form_preselects_project_in_project_detail() {
+        let mut app = app_with_projects();
+        app.select_project(); // selects "Alpha Project" (p1)
+        let projects = vec![("p1".into(), "Alpha Project".into()), ("p2".into(), "Beta".into())];
+        app.open_create_issue_form("v".into(), &test_teams(), &projects);
+
+        let form = app.create_issue_form.as_ref().unwrap();
+        assert_eq!(form.selected_project_name(), "Alpha Project");
+    }
+
+    #[test]
+    fn create_issue_form_cancel_clears() {
+        let mut app = app_with_issues();
+        app.open_create_issue_form("v".into(), &test_teams(), &[]);
+        assert!(app.create_issue_form.is_some());
+        app.cancel_create_issue_form();
+        assert!(app.create_issue_form.is_none());
+    }
+
+    #[test]
+    fn create_issue_form_submit_returns_request() {
+        let mut app = app_with_issues();
+        let projects = vec![("p1".into(), "MyProj".into())];
+        app.open_create_issue_form("v".into(), &test_teams(), &projects);
+        let form = app.create_issue_form.as_mut().unwrap();
+        form.title = "New feature".into();
+        form.team_selected = 1; // Jem (sorted: Core=0, Jem=1)
+        form.project_selected = 1; // MyProj
+        form.priority = IssuePriority::High;
+        form.description = "Some details".into();
+
+        let req = app.submit_create_issue_form().unwrap();
+        assert_eq!(req.team_id, "t1"); // Jem's id
+        assert_eq!(req.title, "New feature");
+        assert_eq!(req.project_id.as_deref(), Some("p1"));
+        assert_eq!(req.priority, Some(2));
+        assert_eq!(req.description.as_deref(), Some("Some details"));
+        assert_eq!(req.assignee_id.as_deref(), Some("v")); // assign_to_me defaults true
+        assert!(app.create_issue_form.is_none());
+    }
+
+    #[test]
+    fn create_issue_assign_to_me_remembers_preference() {
+        let mut app = app_with_issues();
+        assert!(app.create_issue_assign_to_me); // initially true
+
+        // Open, toggle off, submit
+        app.open_create_issue_form("v".into(), &test_teams(), &[]);
+        let form = app.create_issue_form.as_mut().unwrap();
+        form.title = "Test".into();
+        form.toggle_assign_to_me();
+        assert!(!form.assign_to_me);
+
+        let req = app.submit_create_issue_form().unwrap();
+        assert!(req.assignee_id.is_none());
+        assert!(!app.create_issue_assign_to_me); // remembered
+
+        // Next form opens with false
+        app.open_create_issue_form("v".into(), &test_teams(), &[]);
+        let form = app.create_issue_form.as_ref().unwrap();
+        assert!(!form.assign_to_me);
+    }
+
+    #[test]
+    fn create_issue_form_submit_empty_title_keeps_form() {
+        let mut app = app_with_issues();
+        app.open_create_issue_form("v".into(), &test_teams(), &[]);
+        let form = app.create_issue_form.as_mut().unwrap();
+        form.title = "   ".into();
+
+        let result = app.submit_create_issue_form();
+        assert!(result.is_none());
+        assert!(app.create_issue_form.is_some());
+    }
+
+    #[test]
+    fn create_issue_form_field_navigation() {
+        let teams = vec![("t1".into(), "T".into())];
+        let form = CreateIssueForm::new("v".into(), &teams, &[], None, true);
+        assert_eq!(form.focus, CreateIssueField::Title);
+        let mut f = form;
+        f.focus_next();
+        assert_eq!(f.focus, CreateIssueField::Team);
+        f.focus_next();
+        assert_eq!(f.focus, CreateIssueField::Project);
+        f.focus_next();
+        assert_eq!(f.focus, CreateIssueField::Priority);
+        f.focus_next();
+        assert_eq!(f.focus, CreateIssueField::AssignToMe);
+        f.focus_next();
+        assert_eq!(f.focus, CreateIssueField::Description);
+        f.focus_next();
+        assert_eq!(f.focus, CreateIssueField::Submit);
+        f.focus_next();
+        assert_eq!(f.focus, CreateIssueField::Title);
+        f.focus_prev();
+        assert_eq!(f.focus, CreateIssueField::Submit);
+    }
+
+    #[test]
+    fn create_issue_form_project_navigation() {
+        let teams = vec![("t1".into(), "T".into())];
+        let projects = vec![("p1".into(), "A".into()), ("p2".into(), "B".into())];
+        let mut form = CreateIssueForm::new("v".into(), &teams, &projects, None, true);
+        assert_eq!(form.project_selected, 0); // None
+        form.project_move_down();
+        assert_eq!(form.project_selected, 1); // A
+        form.project_move_down();
+        assert_eq!(form.project_selected, 2); // B
+        form.project_move_down();
+        assert_eq!(form.project_selected, 2); // stays at end
+        form.project_move_up();
+        assert_eq!(form.project_selected, 1);
+    }
+
+    #[test]
+    fn create_issue_team_navigation_and_type_ahead() {
+        let teams = vec![
+            ("t1".into(), "Alpha".into()),
+            ("t2".into(), "Bravo".into()),
+            ("t3".into(), "Charlie".into()),
+        ];
+        let mut form = CreateIssueForm::new("v".into(), &teams, &[], None, true);
+        assert_eq!(form.selected_team_name(), "Alpha");
+
+        form.team_move_down();
+        assert_eq!(form.selected_team_name(), "Bravo");
+        form.team_move_down();
+        assert_eq!(form.selected_team_name(), "Charlie");
+        form.team_move_down();
+        assert_eq!(form.selected_team_name(), "Charlie"); // stays
+        form.team_move_up();
+        assert_eq!(form.selected_team_name(), "Bravo");
+
+        // Type-ahead snaps to first match
+        form.team_type_ahead_push('c');
+        assert_eq!(form.selected_team_name(), "Charlie");
+        let filtered = form.filtered_team_options();
+        assert_eq!(filtered.len(), 1);
+
+        form.team_type_ahead_pop();
+        // Back to empty — all visible, stays on Charlie
+        assert_eq!(form.filtered_team_options().len(), 3);
+    }
+
+    #[test]
+    fn create_issue_priority_cycle() {
+        let teams = vec![("t1".into(), "T".into())];
+        let mut form = CreateIssueForm::new("v".into(), &teams, &[], None, true);
+        assert_eq!(form.priority, IssuePriority::None);
+        form.priority_next();
+        assert_eq!(form.priority, IssuePriority::Urgent);
+        form.priority_next();
+        assert_eq!(form.priority, IssuePriority::High);
+        form.priority_next();
+        assert_eq!(form.priority, IssuePriority::Medium);
+        form.priority_next();
+        assert_eq!(form.priority, IssuePriority::Low);
+        form.priority_next();
+        assert_eq!(form.priority, IssuePriority::None);
+    }
+
+    #[test]
+    fn create_issue_form_empty_description_becomes_none() {
+        let mut app = app_with_issues();
+        app.open_create_issue_form("v".into(), &test_teams(), &[]);
+        let form = app.create_issue_form.as_mut().unwrap();
+        form.title = "Title".into();
+        form.description = "  \n  ".into();
+
+        let req = app.submit_create_issue_form().unwrap();
+        assert!(req.description.is_none());
+    }
+
+    #[test]
+    fn create_issue_project_type_ahead_filters_and_snaps() {
+        let teams = vec![("t1".into(), "T".into())];
+        let projects = vec![
+            ("p1".into(), "Alpha".into()),
+            ("p2".into(), "Beta".into()),
+            ("p3".into(), "Gamma".into()),
+        ];
+        let mut form = CreateIssueForm::new("v".into(), &teams, &projects, None, true);
+        assert_eq!(form.project_selected, 0);
+
+        form.project_type_ahead_push('b');
+        assert_eq!(form.selected_project_name(), "Beta");
+
+        let filtered = form.filtered_project_options();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].1 .1, "Beta");
+
+        form.project_type_ahead_push('z');
+        let filtered = form.filtered_project_options();
+        assert!(filtered.is_empty());
+
+        form.project_type_ahead_pop();
+        assert_eq!(form.selected_project_name(), "Beta");
+    }
+
+    #[test]
+    fn create_issue_project_type_ahead_navigate_filtered() {
+        let teams = vec![("t1".into(), "T".into())];
+        let projects = vec![
+            ("p1".into(), "Alpha".into()),
+            ("p2".into(), "Amber".into()),
+            ("p3".into(), "Zulu".into()),
+        ];
+        let mut form = CreateIssueForm::new("v".into(), &teams, &projects, None, true);
+        form.project_type_ahead_push('a');
+        assert_eq!(form.selected_project_name(), "Alpha");
+
+        form.project_move_down();
+        assert_eq!(form.selected_project_name(), "Amber");
+
+        form.project_move_down();
+        assert_eq!(form.selected_project_name(), "Amber"); // stays
+
+        form.project_move_up();
+        assert_eq!(form.selected_project_name(), "Alpha");
+    }
+
+    #[test]
+    fn create_issue_focus_change_clears_type_ahead() {
+        let teams = vec![("t1".into(), "T".into())];
+        let projects = vec![("p1".into(), "Alpha".into())];
+        let mut form = CreateIssueForm::new("v".into(), &teams, &projects, None, true);
+
+        form.focus = CreateIssueField::Team;
+        form.team_type_ahead_push('t');
+        assert!(!form.team_type_ahead.is_empty());
+        form.focus_next(); // Team → Project
+        assert!(form.team_type_ahead.is_empty());
+
+        form.project_type_ahead_push('a');
+        assert!(!form.project_type_ahead.is_empty());
+        form.focus_next(); // Project → Priority
+        assert!(form.project_type_ahead.is_empty());
     }
 }

@@ -1,3 +1,4 @@
+pub mod create_issue;
 pub mod detail;
 pub mod help;
 pub mod my_issues;

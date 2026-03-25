@@ -36,7 +36,8 @@ pub const KEYBINDINGS: &[(&str, &str)] = &[
     ("p", "Projects"),
     ("m", "Change issue state"),
     ("Ctrl+m", "Add comment to issue (detail)"),
-    ("c p", "Copy agent prompt to clipboard"),
+    ("c", "Create new issue (issues view)"),
+    ("c p", "Copy agent prompt to clipboard (detail)"),
 ];
 
 pub fn render(frame: &mut Frame, area: Rect) {
