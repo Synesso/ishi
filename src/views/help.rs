@@ -38,6 +38,7 @@ pub const KEYBINDINGS: &[(&str, &str)] = &[
     ("Ctrl+m", "Add comment to issue (detail)"),
     ("c", "Create new issue (issues view)"),
     ("c p", "Copy agent prompt to clipboard (detail)"),
+    ("n", "Quick create issue with AI (issues view)"),
 ];
 
 pub fn render(frame: &mut Frame, area: Rect) {
@@ -57,7 +58,7 @@ pub fn render(frame: &mut Frame, area: Rect) {
         .collect();
 
     let content_height = (lines.len() as u16) + 2; // +2 for borders
-    let content_width = 40_u16;
+    let content_width = 55_u16;
 
     let popup_height = content_height.min(area.height.saturating_sub(4));
     let popup_width = content_width.min(area.width.saturating_sub(4));

@@ -23,6 +23,7 @@ pub enum Action {
     SendInstruction,
     Copy,
     Comment,
+    QuickCreate,
 }
 
 pub fn map_key(key: KeyEvent) -> Option<Action> {
@@ -50,6 +51,7 @@ pub fn map_key(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Char('m')) => Some(Action::ChangeState),
         (_, KeyCode::Char('i')) => Some(Action::SendInstruction),
         (_, KeyCode::Char('c')) => Some(Action::Copy),
+        (_, KeyCode::Char('n')) => Some(Action::QuickCreate),
         _ => None,
     }
 }
@@ -206,6 +208,14 @@ mod tests {
         assert!(matches!(
             map_key(key_with(KeyCode::Char('m'), KeyModifiers::CONTROL)),
             Some(Action::Comment)
+        ));
+    }
+
+    #[test]
+    fn quick_create_on_n() {
+        assert!(matches!(
+            map_key(key(KeyCode::Char('n'))),
+            Some(Action::QuickCreate)
         ));
     }
 

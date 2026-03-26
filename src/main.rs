@@ -24,6 +24,12 @@ enum BgMessage {
     Error(String),
     ThreadCreated { issue_identifier: String },
     IssueCreated(crate::api::types::Issue),
+    QuickCreateExtracted {
+        viewer_id: String,
+        teams: Vec<(String, String)>,
+        projects: Vec<(String, String)>,
+        extracted: crate::api::anthropic::ExtractedIssue,
+    },
 }
 
 enum RunManagementAction {
@@ -419,6 +425,7 @@ async fn main() -> Result<()> {
         while let Ok(msg) = bg_rx.try_recv() {
             match msg {
                 BgMessage::Error(err) => {
+                    app.refreshing = false;
                     app.error = Some(app::AppError::new(err));
                 }
                 BgMessage::ThreadCreated { issue_identifier } => {
@@ -437,6 +444,17 @@ async fn main() -> Result<()> {
                     app.issues.insert(0, issue);
                     app.cache.invalidate(app::CACHE_KEY_MY_ISSUES);
                     app.flash = Some((format!("{} created ✓", identifier), 30));
+                }
+                BgMessage::QuickCreateExtracted {
+                    viewer_id,
+                    teams,
+                    projects,
+                    extracted,
+                } => {
+                    app.refreshing = false;
+                    app.open_create_issue_form_prefilled(
+                        viewer_id, &teams, &projects, &extracted,
+                    );
                 }
             }
         }
@@ -474,6 +492,9 @@ async fn main() -> Result<()> {
             }
             if let Some(ref form) = app.create_issue_form {
                 views::create_issue::render(frame, area, form);
+            }
+            if let Some(ref input) = app.quick_create_input {
+                views::quick_create::render(frame, area, input, app.refreshing);
             }
             if app.show_help {
                 views::help::render(frame, area);
@@ -547,6 +568,83 @@ async fn main() -> Result<()> {
                     }
                     KeyCode::Char(c) => {
                         app.comment_input.push(c);
+                    }
+                    _ => {}
+                }
+            } else if app.quick_create_input.is_some() {
+                match key.code {
+                    KeyCode::Esc => app.cancel_quick_create(),
+                    KeyCode::Enter => {
+                        if let Some(text) = app.submit_quick_create() {
+                            app.refreshing = true;
+                            app.flash = Some(("Extracting with Amp …".into(), 0));
+                            let api = app.api.clone();
+                            let tx = bg_tx.clone();
+                            tokio::spawn(async move {
+                                let (viewer_id, teams) = match api.fetch_viewer_teams().await {
+                                    Ok(v) => v,
+                                    Err(err) => {
+                                        let _ = tx.send(BgMessage::Error(format!(
+                                            "Failed to fetch teams: {err}"
+                                        )));
+                                        return;
+                                    }
+                                };
+                                let projects = match api.fetch_projects().await {
+                                    Ok(p) => p,
+                                    Err(err) => {
+                                        let _ = tx.send(BgMessage::Error(format!(
+                                            "Failed to fetch projects: {err}"
+                                        )));
+                                        return;
+                                    }
+                                };
+                                let team_names: Vec<String> =
+                                    teams.iter().map(|(_, n)| n.clone()).collect();
+                                let project_names: Vec<String> =
+                                    projects.iter().map(|p| p.name.clone()).collect();
+                                let result = tokio::task::spawn_blocking(move || {
+                                    crate::api::anthropic::extract_issue_from_text(
+                                        &text,
+                                        &team_names,
+                                        &project_names,
+                                    )
+                                })
+                                .await;
+                                match result {
+                                    Ok(Ok(extracted)) => {
+                                        let project_pairs: Vec<(String, String)> =
+                                            projects.iter().map(|p| (p.id.clone(), p.name.clone())).collect();
+                                        let _ = tx.send(BgMessage::QuickCreateExtracted {
+                                            viewer_id,
+                                            teams,
+                                            projects: project_pairs,
+                                            extracted,
+                                        });
+                                    }
+                                    Ok(Err(err)) => {
+                                        let _ = tx.send(BgMessage::Error(format!(
+                                            "AI extraction failed: {err}"
+                                        )));
+                                    }
+                                    Err(err) => {
+                                        let _ = tx.send(BgMessage::Error(format!(
+                                            "AI extraction task failed: {err}"
+                                        )));
+                                    }
+                                }
+                            });
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        if let Some(ref mut input) = app.quick_create_input {
+                            input.pop();
+                        }
+                    }
+                    KeyCode::Char(c) => {
+                        if let Some(ref mut input) = app.quick_create_input {
+                            input.push(c);
+                        }
                     }
                     _ => {}
                 }
@@ -1039,6 +1137,7 @@ async fn main() -> Result<()> {
                                 }
                             }
                         }
+                        keys::Action::QuickCreate => app.open_quick_create(),
                         _ => {}
                     }
                 }
@@ -1232,6 +1331,7 @@ async fn main() -> Result<()> {
                             }
                         }
                     }
+                    keys::Action::QuickCreate => app.open_quick_create(),
                     _ => {}
                 }
             }

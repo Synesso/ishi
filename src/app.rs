@@ -601,6 +601,44 @@ impl CreateIssueForm {
     pub fn priority_prev(&mut self) {
         self.priority = self.priority.prev();
     }
+
+    /// Pre-fill form fields from AI-extracted issue data.
+    pub fn prefill(&mut self, extracted: &crate::api::anthropic::ExtractedIssue) {
+        self.title = extracted.title.clone();
+        self.description = extracted.description.clone();
+
+        if let Some(ref team) = extracted.team_name {
+            let lower = team.to_lowercase();
+            if let Some(pos) = self
+                .team_options
+                .iter()
+                .position(|(_, name)| name.to_lowercase() == lower)
+            {
+                self.team_selected = pos;
+            }
+        }
+
+        if let Some(ref project) = extracted.project_name {
+            let lower = project.to_lowercase();
+            if let Some(pos) = self
+                .project_options
+                .iter()
+                .position(|(_, name)| name.to_lowercase() == lower)
+            {
+                self.project_selected = pos;
+            }
+        }
+
+        if let Some(ref p) = extracted.priority {
+            self.priority = match p.to_lowercase().as_str() {
+                "urgent" => IssuePriority::Urgent,
+                "high" => IssuePriority::High,
+                "medium" => IssuePriority::Medium,
+                "low" => IssuePriority::Low,
+                _ => IssuePriority::None,
+            };
+        }
+    }
 }
 
 /// User-friendly error message displayed in the status bar.
@@ -701,6 +739,8 @@ pub struct App<A: LinearApi> {
     pub create_issue_form: Option<CreateIssueForm>,
     /// Remembered assign-to-me preference across form opens (initially true).
     pub create_issue_assign_to_me: bool,
+    /// Quick create: free-text input buffer.
+    pub quick_create_input: Option<String>,
 }
 
 impl<A: LinearApi> App<A> {
@@ -762,6 +802,7 @@ impl<A: LinearApi> App<A> {
             thread_counts: HashMap::new(),
             create_issue_form: None,
             create_issue_assign_to_me: true,
+            quick_create_input: None,
         }
     }
 
@@ -1271,6 +1312,49 @@ impl<A: LinearApi> App<A> {
             preselect,
             self.create_issue_assign_to_me,
         ));
+    }
+
+    /// Open the quick create text input modal.
+    pub fn open_quick_create(&mut self) {
+        self.quick_create_input = Some(String::new());
+    }
+
+    /// Cancel the quick create input.
+    pub fn cancel_quick_create(&mut self) {
+        self.quick_create_input = None;
+    }
+
+    /// Take the quick create input text and close the modal.
+    pub fn submit_quick_create(&mut self) -> Option<String> {
+        let text = self.quick_create_input.take()?;
+        let trimmed = text.trim().to_string();
+        if trimmed.is_empty() { None } else { Some(trimmed) }
+    }
+
+    /// Open the create-issue form pre-populated from AI extraction.
+    pub fn open_create_issue_form_prefilled(
+        &mut self,
+        viewer_id: String,
+        teams: &[(String, String)],
+        projects: &[(String, String)],
+        extracted: &crate::api::anthropic::ExtractedIssue,
+    ) {
+        if teams.is_empty() {
+            return;
+        }
+        let preselect = match self.view {
+            View::ProjectDetail => self.selected_project().map(|p| p.id.as_str()),
+            _ => None,
+        };
+        let mut form = CreateIssueForm::new(
+            viewer_id,
+            teams,
+            projects,
+            preselect,
+            self.create_issue_assign_to_me,
+        );
+        form.prefill(extracted);
+        self.create_issue_form = Some(form);
     }
 
     /// Cancel the create-issue form.
