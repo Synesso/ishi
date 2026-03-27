@@ -38,40 +38,65 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
 
     let rows: Vec<Row> = issues
         .iter()
-        .map(|issue| {
+        .enumerate()
+        .map(|(idx, issue)| {
+            let is_multi_selected = app.selected_indices.contains(&idx);
+            let base_style = if is_multi_selected {
+                Style::default().fg(Color::Cyan)
+            } else {
+                Style::default()
+            };
             let thread_display = app.thread_count_display(&issue.identifier);
             let thread_style = if thread_display.contains('/') {
                 Style::default().fg(Color::Green)
             } else if thread_display == "-" {
                 Style::default().fg(Color::DarkGray)
             } else {
-                Style::default()
+                base_style
             };
+            let select_marker = if is_multi_selected { "▌ " } else { "  " };
+            let mut id_spans = vec![Span::styled(
+                select_marker,
+                if is_multi_selected {
+                    Style::default().fg(Color::Cyan)
+                } else {
+                    Style::default()
+                },
+            )];
+            id_spans.extend(highlight_match(
+                issue.identifier.as_str(),
+                search_query,
+                base_style,
+            ));
             Row::new(vec![
-                Cell::from(Line::from(highlight_match(
-                    issue.identifier.as_str(),
-                    search_query,
-                    Style::default(),
-                ))),
+                Cell::from(Line::from(id_spans)),
                 Cell::from(Line::from(highlight_match(
                     issue.title.as_str(),
                     search_query,
-                    Style::default(),
+                    base_style,
                 ))),
                 Cell::from(Line::from(highlight_match(
                     issue.project_str(),
                     search_query,
-                    Style::default(),
+                    base_style,
                 ))),
                 Cell::from(Line::from(highlight_match(
                     issue.status_str(),
                     search_query,
-                    status_style(issue.status_str()),
+                    if is_multi_selected {
+                        base_style
+                    } else {
+                        status_style(issue.status_str())
+                    },
                 ))),
                 Cell::from(Line::from(highlight_match(
                     issue.priority_str(),
                     search_query,
-                    priority_style(issue.priority_str()),
+                    if is_multi_selected {
+                        base_style
+                    } else {
+                        priority_style(issue.priority_str())
+                    },
                 ))),
                 Cell::from(Span::styled(thread_display, thread_style)),
             ])
@@ -94,28 +119,36 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         None => String::new(),
     };
 
+    let select_indicator = if app.selected_indices.len() > 1 {
+        format!(" [{} selected]", app.selected_indices.len())
+    } else {
+        String::new()
+    };
+
     let title = match &app.filter {
         Some((col, f)) => format!(
-            "My Issues ({} of {}){}{} [filter: {} = {}]",
+            "My Issues ({} of {}){}{}{} [filter: {} = {}]",
             issues.len(),
             app.issues.len(),
             sort_indicator,
             search_indicator,
+            select_indicator,
             col.label(),
             f
         ),
         None => format!(
-            "My Issues ({}){}{}",
+            "My Issues ({}){}{}{}",
             issues.len(),
             sort_indicator,
-            search_indicator
+            search_indicator,
+            select_indicator
         ),
     };
 
     let table = Table::new(
         rows,
         [
-            Constraint::Length(10),
+            Constraint::Length(18),
             Constraint::Min(30),
             Constraint::Length(20),
             Constraint::Length(15),

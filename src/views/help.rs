@@ -14,6 +14,8 @@ pub const KEYBINDINGS: &[(&str, &str)] = &[
     ("Ctrl+c", "Quit immediately"),
     ("j / ↓", "Move down / scroll down"),
     ("k / ↑", "Move up / scroll up"),
+    ("J / S-↓", "Select down (multi-select)"),
+    ("K / S-↑", "Select up (multi-select)"),
     ("g", "Go to top"),
     ("G", "Go to bottom"),
     ("Ctrl+f", "Page down"),

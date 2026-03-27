@@ -4,6 +4,8 @@ pub enum Action {
     Quit,
     MoveDown,
     MoveUp,
+    SelectDown,
+    SelectUp,
     Top,
     Bottom,
     Select,
@@ -32,6 +34,12 @@ pub fn map_key(key: KeyEvent) -> Option<Action> {
     match (key.modifiers, key.code) {
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(Action::Quit),
         (KeyModifiers::NONE, KeyCode::Char('q')) => Some(Action::Quit),
+        (KeyModifiers::SHIFT, KeyCode::Char('J')) | (KeyModifiers::SHIFT, KeyCode::Down) => {
+            Some(Action::SelectDown)
+        }
+        (KeyModifiers::SHIFT, KeyCode::Char('K')) | (KeyModifiers::SHIFT, KeyCode::Up) => {
+            Some(Action::SelectUp)
+        }
         (_, KeyCode::Char('j')) | (_, KeyCode::Down) => Some(Action::MoveDown),
         (_, KeyCode::Char('k')) | (_, KeyCode::Up) => Some(Action::MoveUp),
         (_, KeyCode::Char('g')) => Some(Action::Top),
@@ -220,6 +228,38 @@ mod tests {
         assert!(matches!(
             map_key(key(KeyCode::Char('n'))),
             Some(Action::QuickCreate)
+        ));
+    }
+
+    #[test]
+    fn select_down_on_shift_j() {
+        assert!(matches!(
+            map_key(key_with(KeyCode::Char('J'), KeyModifiers::SHIFT)),
+            Some(Action::SelectDown)
+        ));
+    }
+
+    #[test]
+    fn select_up_on_shift_k() {
+        assert!(matches!(
+            map_key(key_with(KeyCode::Char('K'), KeyModifiers::SHIFT)),
+            Some(Action::SelectUp)
+        ));
+    }
+
+    #[test]
+    fn select_down_on_shift_down() {
+        assert!(matches!(
+            map_key(key_with(KeyCode::Down, KeyModifiers::SHIFT)),
+            Some(Action::SelectDown)
+        ));
+    }
+
+    #[test]
+    fn select_up_on_shift_up() {
+        assert!(matches!(
+            map_key(key_with(KeyCode::Up, KeyModifiers::SHIFT)),
+            Some(Action::SelectUp)
         ));
     }
 

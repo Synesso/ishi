@@ -977,28 +977,63 @@ async fn main() -> Result<()> {
                 match key.code {
                     KeyCode::Enter => {
                         let state_name = app.selected_state_option().map(|s| s.to_string());
-                        let issue = app
-                            .context_issue()
-                            .map(|i| (i.id.clone(), i.identifier.clone()));
+                        let targets = app.target_issues();
                         app.cancel_state_change();
-                        if let (Some(state_name), Some((issue_id, identifier))) =
-                            (state_name, issue)
-                        {
-                            // Optimistic update: apply locally first for instant feedback.
-                            app.apply_local_state_change(&state_name);
-                            // Fire-and-forget: spawn the API call in the background.
-                            let api = app.api.clone();
-                            let tx = bg_tx.clone();
-                            tokio::spawn(async move {
-                                if let Err(err) =
-                                    api.update_issue_state(&issue_id, &state_name).await
-                                {
-                                    let _ = tx.send(BgMessage::Error(format!(
-                                        "Failed to update state for {}: {}",
-                                        identifier, err
-                                    )));
+                        if let Some(state_name) = state_name {
+                            if targets.len() > 1 {
+                                // Multi-select: update all targeted issues
+                                let issue_ids: Vec<String> =
+                                    targets.iter().map(|(id, _, _)| id.clone()).collect();
+                                app.apply_local_state_change_multi(&issue_ids, &state_name);
+                                app.selected_indices.clear();
+                                for (issue_id, identifier, team_name) in targets {
+                                    let api = app.api.clone();
+                                    let tx = bg_tx.clone();
+                                    let state = state_name.clone();
+                                    tokio::spawn(async move {
+                                        // Only apply if the team has this state (for cross-team)
+                                        let should_apply = match api
+                                            .fetch_team_states(&issue_id)
+                                            .await
+                                        {
+                                            Ok(states) => states.iter().any(|s| s == &state),
+                                            Err(_) => false,
+                                        };
+                                        if should_apply {
+                                            if let Err(err) =
+                                                api.update_issue_state(&issue_id, &state).await
+                                            {
+                                                let _ = tx.send(BgMessage::Error(format!(
+                                                    "Failed to update state for {}: {}",
+                                                    identifier, err
+                                                )));
+                                            }
+                                        } else {
+                                            let team = team_name.unwrap_or_default();
+                                            let _ = tx.send(BgMessage::Error(format!(
+                                                "Skipped {}: state '{}' not available for team {}",
+                                                identifier, state, team
+                                            )));
+                                        }
+                                    });
                                 }
-                            });
+                            } else if let Some((issue_id, identifier, _)) = targets.into_iter().next()
+                            {
+                                // Single issue: existing path
+                                app.apply_local_state_change(&state_name);
+                                let api = app.api.clone();
+                                let tx = bg_tx.clone();
+                                tokio::spawn(async move {
+                                    if let Err(err) =
+                                        api.update_issue_state(&issue_id, &state_name).await
+                                    {
+                                        let _ = tx.send(BgMessage::Error(format!(
+                                            "Failed to update state for {}: {}",
+                                            identifier, err
+                                        )));
+                                    }
+                                });
+                            }
                         }
                     }
                     KeyCode::Esc => app.cancel_state_change(),
@@ -1268,6 +1303,8 @@ async fn main() -> Result<()> {
                     keys::Action::Quit => app.awaiting_quit = true,
                     keys::Action::MoveDown => app.move_down(),
                     keys::Action::MoveUp => app.move_up(),
+                    keys::Action::SelectDown => app.select_down(),
+                    keys::Action::SelectUp => app.select_up(),
                     keys::Action::PageDown => app.page_down(),
                     keys::Action::PageUp => app.page_up(),
                     keys::Action::Top => app.top(),
@@ -1306,13 +1343,35 @@ async fn main() -> Result<()> {
                         app.load_projects().await;
                     }
                     keys::Action::ChangeState => {
-                        if let Some(issue) = app.context_issue() {
-                            let issue_id = issue.id.clone();
-                            match app.api.fetch_team_states(&issue_id).await {
-                                Ok(states) => app.start_state_change(states),
+                        let targets = app.target_issues();
+                        if !targets.is_empty() {
+                            // Collect unique team issue IDs for state fetching
+                            let first_id = targets[0].0.clone();
+                            match app.api.fetch_team_states(&first_id).await {
+                                Ok(mut states) => {
+                                    // For multi-team selections, intersect available states
+                                    let mut seen_teams = std::collections::HashSet::new();
+                                    if let Some(ref t) = targets[0].2 {
+                                        seen_teams.insert(t.clone());
+                                    }
+                                    for target in &targets[1..] {
+                                        let team_name = target.2.as_deref().unwrap_or("");
+                                        if seen_teams.insert(team_name.to_string()) {
+                                            if let Ok(team_states) =
+                                                app.api.fetch_team_states(&target.0).await
+                                            {
+                                                let team_set: std::collections::HashSet<&str> =
+                                                    team_states.iter().map(|s| s.as_str()).collect();
+                                                states.retain(|s| team_set.contains(s.as_str()));
+                                            }
+                                        }
+                                    }
+                                    app.start_state_change(states);
+                                }
                                 Err(err) => {
-                                    app.error =
-                                        Some(app::AppError::new(format!("Failed to fetch states: {err}")));
+                                    app.error = Some(app::AppError::new(format!(
+                                        "Failed to fetch states: {err}"
+                                    )));
                                 }
                             }
                         }

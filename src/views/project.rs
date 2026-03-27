@@ -92,7 +92,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
     let table = Table::new(
         rows,
         [
-            Constraint::Length(10),
+            Constraint::Length(18),
             Constraint::Min(30),
             Constraint::Length(15),
             Constraint::Length(10),

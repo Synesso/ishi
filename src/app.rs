@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
 
 /// Compare identifiers like "FOO-123" by prefix lexically, then suffix numerically.
@@ -741,6 +741,8 @@ pub struct App<A: LinearApi> {
     pub create_issue_assign_to_me: bool,
     /// Quick create: free-text input buffer.
     pub quick_create_input: Option<String>,
+    /// Indices (into filtered_issues) selected via Shift+j/k for multi-issue operations.
+    pub selected_indices: BTreeSet<usize>,
 }
 
 impl<A: LinearApi> App<A> {
@@ -803,6 +805,7 @@ impl<A: LinearApi> App<A> {
             create_issue_form: None,
             create_issue_assign_to_me: true,
             quick_create_input: None,
+            selected_indices: BTreeSet::new(),
         }
     }
 
@@ -879,6 +882,7 @@ impl<A: LinearApi> App<A> {
     }
 
     pub fn move_down(&mut self) {
+        self.selected_indices.clear();
         let len = self.filtered_issues().len();
         if len > 0 && self.selected < len - 1 {
             self.selected += 1;
@@ -886,12 +890,38 @@ impl<A: LinearApi> App<A> {
     }
 
     pub fn move_up(&mut self) {
+        self.selected_indices.clear();
         if self.selected > 0 {
             self.selected -= 1;
         }
     }
 
+    pub fn select_down(&mut self) {
+        let len = self.filtered_issues().len();
+        if len == 0 {
+            return;
+        }
+        self.selected_indices.insert(self.selected);
+        if self.selected < len - 1 {
+            self.selected += 1;
+            self.selected_indices.insert(self.selected);
+        }
+    }
+
+    pub fn select_up(&mut self) {
+        let len = self.filtered_issues().len();
+        if len == 0 {
+            return;
+        }
+        self.selected_indices.insert(self.selected);
+        if self.selected > 0 {
+            self.selected -= 1;
+            self.selected_indices.insert(self.selected);
+        }
+    }
+
     pub fn page_down(&mut self) {
+        self.selected_indices.clear();
         let len = self.filtered_issues().len();
         if len > 0 {
             self.selected = (self.selected + 20).min(len - 1);
@@ -899,14 +929,17 @@ impl<A: LinearApi> App<A> {
     }
 
     pub fn page_up(&mut self) {
+        self.selected_indices.clear();
         self.selected = self.selected.saturating_sub(20);
     }
 
     pub fn top(&mut self) {
+        self.selected_indices.clear();
         self.selected = 0;
     }
 
     pub fn bottom(&mut self) {
+        self.selected_indices.clear();
         let len = self.filtered_issues().len();
         if len > 0 {
             self.selected = len - 1;
@@ -1659,6 +1692,54 @@ impl<A: LinearApi> App<A> {
             self.project_cache.invalidate(CACHE_KEY_PROJECTS);
             let _ = identifier; // suppress unused warning
         }
+    }
+
+    /// Returns the issues targeted by a multi-select operation.
+    /// If `selected_indices` is non-empty, returns those issues; otherwise returns the single
+    /// context issue (cursor position).
+    pub fn target_issues(&self) -> Vec<(String, String, Option<String>)> {
+        if self.selected_indices.is_empty() {
+            return self
+                .context_issue()
+                .map(|i| {
+                    vec![(
+                        i.id.clone(),
+                        i.identifier.clone(),
+                        i.team.as_ref().map(|t| t.name.clone()),
+                    )]
+                })
+                .unwrap_or_default();
+        }
+        let issues = self.filtered_issues();
+        self.selected_indices
+            .iter()
+            .filter_map(|&idx| issues.get(idx))
+            .map(|i| {
+                (
+                    i.id.clone(),
+                    i.identifier.clone(),
+                    i.team.as_ref().map(|t| t.name.clone()),
+                )
+            })
+            .collect()
+    }
+
+    /// Apply a state change to multiple issues locally.
+    pub fn apply_local_state_change_multi(&mut self, issue_ids: &[String], new_state: &str) {
+        for issue_id in issue_ids {
+            if let Some(issue) = self.issues.iter_mut().find(|i| &i.id == issue_id) {
+                issue.state = Some(crate::api::types::IssueState {
+                    name: new_state.to_string(),
+                });
+            }
+            if let Some(issue) = self.project_issues.iter_mut().find(|i| &i.id == issue_id) {
+                issue.state = Some(crate::api::types::IssueState {
+                    name: new_state.to_string(),
+                });
+            }
+        }
+        self.cache.invalidate(CACHE_KEY_MY_ISSUES);
+        self.project_cache.invalidate(CACHE_KEY_PROJECTS);
     }
 
     /// Load projects, serving from cache if fresh, otherwise fetching from API.
@@ -4566,5 +4647,116 @@ mod tests {
         assert!(!form.project_type_ahead.is_empty());
         form.focus_next(); // Project → Priority
         assert!(form.project_type_ahead.is_empty());
+    }
+
+    #[test]
+    fn select_down_adds_indices() {
+        let mut app = app_with_issues();
+        assert!(app.selected_indices.is_empty());
+        app.select_down();
+        assert_eq!(app.selected_indices.len(), 2);
+        assert!(app.selected_indices.contains(&0));
+        assert!(app.selected_indices.contains(&1));
+        assert_eq!(app.selected, 1);
+    }
+
+    #[test]
+    fn select_up_adds_indices() {
+        let mut app = app_with_issues();
+        app.selected = 2;
+        app.selected_indices.clear();
+        app.select_up();
+        assert_eq!(app.selected_indices.len(), 2);
+        assert!(app.selected_indices.contains(&2));
+        assert!(app.selected_indices.contains(&1));
+        assert_eq!(app.selected, 1);
+    }
+
+    #[test]
+    fn move_down_clears_selection() {
+        let mut app = app_with_issues();
+        app.select_down();
+        assert!(!app.selected_indices.is_empty());
+        app.move_down();
+        assert!(app.selected_indices.is_empty());
+    }
+
+    #[test]
+    fn move_up_clears_selection() {
+        let mut app = app_with_issues();
+        app.selected = 1;
+        app.select_down();
+        assert!(!app.selected_indices.is_empty());
+        app.move_up();
+        assert!(app.selected_indices.is_empty());
+    }
+
+    #[test]
+    fn select_down_at_bottom_stays() {
+        let mut app = app_with_issues();
+        app.selected = 2;
+        app.select_down();
+        assert_eq!(app.selected, 2);
+        assert!(app.selected_indices.contains(&2));
+    }
+
+    #[test]
+    fn select_up_at_top_stays() {
+        let mut app = app_with_issues();
+        app.select_up();
+        assert_eq!(app.selected, 0);
+        assert!(app.selected_indices.contains(&0));
+    }
+
+    #[test]
+    fn target_issues_returns_single_when_no_selection() {
+        let mut app = app_with_issues();
+        app.selected = 1;
+        let targets = app.target_issues();
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].1, "JEM-2");
+    }
+
+    #[test]
+    fn target_issues_returns_multi_when_selected() {
+        let mut app = app_with_issues();
+        app.select_down(); // selects 0 and 1
+        app.select_down(); // selects 2 too
+        let targets = app.target_issues();
+        assert_eq!(targets.len(), 3);
+    }
+
+    #[test]
+    fn apply_local_state_change_multi_updates_all() {
+        let mut app = app_with_issues();
+        let ids = vec!["1".to_string(), "3".to_string()];
+        app.apply_local_state_change_multi(&ids, "Done");
+        assert_eq!(app.issues[0].status_str(), "Done");
+        assert_eq!(app.issues[1].status_str(), "—"); // JEM-2 unchanged
+        assert_eq!(app.issues[2].status_str(), "Done");
+    }
+
+    #[test]
+    fn page_down_clears_selection() {
+        let mut app = app_with_issues();
+        app.select_down();
+        app.page_down();
+        assert!(app.selected_indices.is_empty());
+    }
+
+    #[test]
+    fn top_clears_selection() {
+        let mut app = app_with_issues();
+        app.select_down();
+        app.top();
+        assert!(app.selected_indices.is_empty());
+    }
+
+    #[test]
+    fn bottom_clears_selection() {
+        let mut app = app_with_issues();
+        app.select_down();
+        app.bottom();
+        assert!(app.selected_indices.is_empty());
     }
 }
