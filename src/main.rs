@@ -1092,6 +1092,8 @@ async fn main() -> Result<()> {
                         keys::Action::Quit => app.awaiting_quit = true,
                         keys::Action::MoveDown => app.project_issue_move_down(),
                         keys::Action::MoveUp => app.project_issue_move_up(),
+                        keys::Action::PageDown => app.project_issue_page_down(),
+                        keys::Action::PageUp => app.project_issue_page_up(),
                         keys::Action::Top => app.project_issue_top(),
                         keys::Action::Bottom => app.project_issue_bottom(),
                         keys::Action::Select => {
@@ -1266,6 +1268,8 @@ async fn main() -> Result<()> {
                     keys::Action::Quit => app.awaiting_quit = true,
                     keys::Action::MoveDown => app.move_down(),
                     keys::Action::MoveUp => app.move_up(),
+                    keys::Action::PageDown => app.page_down(),
+                    keys::Action::PageUp => app.page_up(),
                     keys::Action::Top => app.top(),
                     keys::Action::Bottom => app.bottom(),
                     keys::Action::Select => {

@@ -891,6 +891,17 @@ impl<A: LinearApi> App<A> {
         }
     }
 
+    pub fn page_down(&mut self) {
+        let len = self.filtered_issues().len();
+        if len > 0 {
+            self.selected = (self.selected + 20).min(len - 1);
+        }
+    }
+
+    pub fn page_up(&mut self) {
+        self.selected = self.selected.saturating_sub(20);
+    }
+
     pub fn top(&mut self) {
         self.selected = 0;
     }
@@ -1512,6 +1523,17 @@ impl<A: LinearApi> App<A> {
         if self.project_issue_selected > 0 {
             self.project_issue_selected -= 1;
         }
+    }
+
+    pub fn project_issue_page_down(&mut self) {
+        let len = self.filtered_project_issues().len();
+        if len > 0 {
+            self.project_issue_selected = (self.project_issue_selected + 20).min(len - 1);
+        }
+    }
+
+    pub fn project_issue_page_up(&mut self) {
+        self.project_issue_selected = self.project_issue_selected.saturating_sub(20);
     }
 
     pub fn project_issue_top(&mut self) {

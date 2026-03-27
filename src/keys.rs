@@ -24,6 +24,8 @@ pub enum Action {
     Copy,
     Comment,
     QuickCreate,
+    PageDown,
+    PageUp,
 }
 
 pub fn map_key(key: KeyEvent) -> Option<Action> {
@@ -39,6 +41,8 @@ pub fn map_key(key: KeyEvent) -> Option<Action> {
         (_, KeyCode::Char('?')) => Some(Action::Help),
         (_, KeyCode::Char('/')) => Some(Action::Search),
         (_, KeyCode::Char('s')) => Some(Action::OrderBy),
+        (KeyModifiers::CONTROL, KeyCode::Char('f')) => Some(Action::PageDown),
+        (KeyModifiers::CONTROL, KeyCode::Char('b')) => Some(Action::PageUp),
         (_, KeyCode::Char('f')) => Some(Action::FilterBy),
         (_, KeyCode::Char('r')) => Some(Action::Refresh),
         (_, KeyCode::Tab) => Some(Action::Tab),
