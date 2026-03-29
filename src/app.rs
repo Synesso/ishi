@@ -1546,11 +1546,11 @@ impl<A: LinearApi> App<A> {
     }
 
     pub fn selected_project(&self) -> Option<&Project> {
-        self.projects.get(self.project_selected)
+        self.sorted_projects().get(self.project_selected).copied()
     }
 
     pub fn select_project(&mut self) {
-        if self.project_selected < self.projects.len() {
+        if self.selected_project().is_some() {
             self.view = View::ProjectDetail;
             self.project_issue_selected = 0;
         }
@@ -2617,6 +2617,16 @@ mod tests {
         app.project_selected = 1;
         let project = app.selected_project().unwrap();
         assert_eq!(project.name, "Beta Project");
+    }
+
+    #[test]
+    fn selected_project_respects_sorted_order() {
+        let mut app = app_with_projects();
+        app.set_project_sort(ProjectSortColumn::Name);
+        app.set_project_sort(ProjectSortColumn::Name);
+
+        let project = app.selected_project().unwrap();
+        assert_eq!(project.name, "Gamma Project");
     }
 
     #[test]
