@@ -1088,6 +1088,18 @@ async fn main() -> Result<()> {
                     }
                     _ => {}
                 }
+            } else if app.project_searching {
+                match key.code {
+                    KeyCode::Enter => app.apply_project_search(),
+                    KeyCode::Esc => app.cancel_project_search(),
+                    KeyCode::Backspace => {
+                        app.project_search_input.pop();
+                    }
+                    KeyCode::Char(c) => {
+                        app.project_search_input.push(c);
+                    }
+                    _ => {}
+                }
             } else if app.filtering {
                 match key.code {
                     KeyCode::Enter => app.apply_filter(),
@@ -1114,7 +1126,14 @@ async fn main() -> Result<()> {
                             app.select_project();
                             app.load_project_issues().await;
                         }
-                        keys::Action::Back => app.switch_to_my_issues(),
+                        keys::Action::Search => app.start_project_search(),
+                        keys::Action::Back => {
+                            if app.project_search.is_some() {
+                                app.clear_project_search();
+                            } else {
+                                app.switch_to_my_issues();
+                            }
+                        }
                         keys::Action::Refresh => app.refresh_projects().await,
                         keys::Action::Help => app.toggle_help(),
                         keys::Action::OrderBy => app.awaiting_sort = true,

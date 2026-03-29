@@ -49,7 +49,21 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         })
         .collect();
 
-    let title = format!("Projects ({})", projects.len());
+    let search_indicator = match &app.project_search {
+        Some(q) => format!(" [search: {}]", q),
+        None => String::new(),
+    };
+
+    let title = if app.project_search.is_some() {
+        format!(
+            "Projects ({} of {}){}",
+            projects.len(),
+            app.projects.len(),
+            search_indicator
+        )
+    } else {
+        format!("Projects ({}){}", projects.len(), search_indicator)
+    };
 
     let table = Table::new(
         rows,
@@ -65,7 +79,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
     .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
     let mut table_state = TableState::default();
-    if !app.projects.is_empty() {
+    if !projects.is_empty() {
         table_state.select(Some(app.project_selected));
     }
 
@@ -113,6 +127,16 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
             Style::default().fg(Color::Green),
         ));
         frame.render_widget(Paragraph::new(line), chunks[1]);
+    } else if app.project_searching {
+        let line = Line::from(vec![
+            Span::raw("/"),
+            Span::styled(
+                &app.project_search_input,
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("▏"),
+        ]);
+        frame.render_widget(Paragraph::new(line), chunks[1]);
     } else if app.awaiting_quit {
         let line = Line::from(vec![
             Span::raw("Press "),
@@ -120,11 +144,16 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
             Span::raw(" again to quit"),
         ]);
         frame.render_widget(Paragraph::new(line), chunks[1]);
+    } else if app.project_search.is_some() {
+        let line = Line::from(vec![Span::raw("Active — press Esc to clear")]);
+        frame.render_widget(Paragraph::new(line), chunks[1]);
     } else {
         let sep = Span::styled(" │ ", Style::default().fg(Color::DarkGray));
         let line = Line::from(vec![
             Span::styled("s", key_style),
             Span::raw("ort  "),
+            Span::styled("/", key_style),
+            Span::raw("search  "),
             Span::styled("o", key_style),
             Span::raw("pen  "),
             Span::styled("r", key_style),

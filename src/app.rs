@@ -702,6 +702,9 @@ pub struct App<A: LinearApi> {
     pub search: Option<String>,
     pub search_input: String,
     pub searching: bool,
+    pub project_search: Option<String>,
+    pub project_search_input: String,
+    pub project_searching: bool,
     pub detail_scroll: u16,
     pub detail_scroll_max: u16,
     pub refreshing: bool,
@@ -772,6 +775,9 @@ impl<A: LinearApi> App<A> {
             search: None,
             search_input: String::new(),
             searching: false,
+            project_search: None,
+            project_search_input: String::new(),
+            project_searching: false,
             detail_scroll: 0,
             detail_scroll_max: 0,
             refreshing: false,
@@ -874,6 +880,32 @@ impl<A: LinearApi> App<A> {
         issues
     }
 
+    pub fn filtered_projects(&self) -> Vec<&Project> {
+        let mut projects: Vec<&Project> = self.projects.iter().collect();
+        if let Some(q) = &self.project_search {
+            let lower = q.to_lowercase();
+            projects.retain(|project| project.matches_search(&lower));
+        }
+        if let Some((col, dir)) = &self.project_sort {
+            projects.sort_by(|a, b| {
+                let ord = match col {
+                    ProjectSortColumn::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                    ProjectSortColumn::Status => a.status_str().cmp(b.status_str()),
+                    ProjectSortColumn::Lead => a.lead_str().cmp(b.lead_str()),
+                    ProjectSortColumn::Progress => a
+                        .progress
+                        .partial_cmp(&b.progress)
+                        .unwrap_or(Ordering::Equal),
+                };
+                match dir {
+                    SortDirection::Asc => ord,
+                    SortDirection::Desc => ord.reverse(),
+                }
+            });
+        }
+        projects
+    }
+
     pub fn set_sort(&mut self, col: SortColumn) {
         self.sort = Some(match self.sort {
             Some((c, dir)) if c == col => (col, dir.toggle()),
@@ -972,6 +1004,32 @@ impl<A: LinearApi> App<A> {
         self.search = None;
         self.search_input.clear();
         self.selected = 0;
+    }
+
+    pub fn start_project_search(&mut self) {
+        self.project_searching = true;
+        self.project_search_input.clear();
+    }
+
+    pub fn apply_project_search(&mut self) {
+        self.project_searching = false;
+        if self.project_search_input.is_empty() {
+            self.project_search = None;
+        } else {
+            self.project_search = Some(self.project_search_input.clone());
+        }
+        self.project_selected = 0;
+    }
+
+    pub fn cancel_project_search(&mut self) {
+        self.project_searching = false;
+        self.project_search_input.clear();
+    }
+
+    pub fn clear_project_search(&mut self) {
+        self.project_search = None;
+        self.project_search_input.clear();
+        self.project_selected = 0;
     }
 
     pub fn start_column_filter(&mut self, col: SortColumn) {
@@ -1481,25 +1539,7 @@ impl<A: LinearApi> App<A> {
     }
 
     pub fn sorted_projects(&self) -> Vec<&Project> {
-        let mut projects: Vec<&Project> = self.projects.iter().collect();
-        if let Some((col, dir)) = &self.project_sort {
-            projects.sort_by(|a, b| {
-                let ord = match col {
-                    ProjectSortColumn::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-                    ProjectSortColumn::Status => a.status_str().cmp(b.status_str()),
-                    ProjectSortColumn::Lead => a.lead_str().cmp(b.lead_str()),
-                    ProjectSortColumn::Progress => a
-                        .progress
-                        .partial_cmp(&b.progress)
-                        .unwrap_or(Ordering::Equal),
-                };
-                match dir {
-                    SortDirection::Asc => ord,
-                    SortDirection::Desc => ord.reverse(),
-                }
-            });
-        }
-        projects
+        self.filtered_projects()
     }
 
     pub fn set_project_sort(&mut self, col: ProjectSortColumn) {
@@ -1511,7 +1551,7 @@ impl<A: LinearApi> App<A> {
     }
 
     pub fn project_move_down(&mut self) {
-        let len = self.projects.len();
+        let len = self.filtered_projects().len();
         if len > 0 && self.project_selected < len - 1 {
             self.project_selected += 1;
         }
@@ -1524,7 +1564,7 @@ impl<A: LinearApi> App<A> {
     }
 
     pub fn project_page_down(&mut self) {
-        let len = self.projects.len();
+        let len = self.filtered_projects().len();
         if len > 0 {
             self.project_selected = (self.project_selected + 20).min(len - 1);
         }
@@ -1539,7 +1579,7 @@ impl<A: LinearApi> App<A> {
     }
 
     pub fn project_bottom(&mut self) {
-        let len = self.projects.len();
+        let len = self.filtered_projects().len();
         if len > 0 {
             self.project_selected = len - 1;
         }
@@ -2617,6 +2657,46 @@ mod tests {
         app.project_selected = 1;
         let project = app.selected_project().unwrap();
         assert_eq!(project.name, "Beta Project");
+    }
+
+    #[test]
+    fn project_search_filters_case_insensitively_across_name_status_and_lead() {
+        let mut app = app_with_projects();
+
+        app.project_search = Some("aliCE".into());
+        let projects = app.filtered_projects();
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].name, "Alpha Project");
+
+        app.project_search = Some("PLANNED".into());
+        let projects = app.filtered_projects();
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].name, "Beta Project");
+    }
+
+    #[test]
+    fn apply_project_search_sets_and_resets_cursor() {
+        let mut app = app_with_projects();
+        app.project_selected = 2;
+
+        app.start_project_search();
+        app.project_search_input = "beta".into();
+        app.apply_project_search();
+
+        assert_eq!(app.project_search.as_deref(), Some("beta"));
+        assert_eq!(app.project_selected, 0);
+        assert!(!app.project_searching);
+    }
+
+    #[test]
+    fn project_navigation_uses_filtered_projects() {
+        let mut app = app_with_projects();
+        app.project_search = Some("beta".into());
+
+        app.project_move_down();
+
+        assert_eq!(app.project_selected, 0);
+        assert_eq!(app.selected_project().unwrap().name, "Beta Project");
     }
 
     #[test]

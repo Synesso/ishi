@@ -112,11 +112,12 @@ impl Issue {
     }
 
     pub fn matches_search(&self, query: &str) -> bool {
-        self.identifier.to_lowercase().contains(query)
-            || self.title.to_lowercase().contains(query)
-            || self.project_str().to_lowercase().contains(query)
-            || self.status_str().to_lowercase().contains(query)
-            || self.priority_str().to_lowercase().contains(query)
+        let query = query.to_lowercase();
+        self.identifier.to_lowercase().contains(&query)
+            || self.title.to_lowercase().contains(&query)
+            || self.project_str().to_lowercase().contains(&query)
+            || self.status_str().to_lowercase().contains(&query)
+            || self.priority_str().to_lowercase().contains(&query)
     }
 }
 
@@ -149,6 +150,13 @@ impl Project {
             Some(p) => format!("{:.0}%", p * 100.0),
             None => "—".into(),
         }
+    }
+
+    pub fn matches_search(&self, query: &str) -> bool {
+        let query = query.to_lowercase();
+        self.name.to_lowercase().contains(&query)
+            || self.status_str().to_lowercase().contains(&query)
+            || self.lead_str().to_lowercase().contains(&query)
     }
 }
 
@@ -226,6 +234,25 @@ mod tests {
             url: None,
         };
         assert_eq!(project.progress_percent(), "33%");
+    }
+
+    #[test]
+    fn project_matches_search_case_insensitively_across_name_status_and_lead() {
+        let project = Project {
+            id: "p".into(),
+            name: "Alpha Project".into(),
+            state: Some("started".into()),
+            progress: Some(0.33),
+            lead: Some(IssueUser {
+                name: "Alice".into(),
+            }),
+            url: None,
+        };
+
+        assert!(project.matches_search("alpha"));
+        assert!(project.matches_search("STARTED"));
+        assert!(project.matches_search("aliCE"));
+        assert!(!project.matches_search("beta"));
     }
 
     #[test]
