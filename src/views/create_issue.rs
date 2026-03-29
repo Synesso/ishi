@@ -28,14 +28,14 @@ pub fn render(frame: &mut Frame, area: Rect, form: &CreateIssueForm) {
     let picker_rows = 3u16;
 
     let chunks = Layout::vertical([
-        Constraint::Length(3),              // Title
+        Constraint::Length(3),               // Title
         Constraint::Length(picker_rows + 2), // Team
         Constraint::Length(picker_rows + 2), // Project
-        Constraint::Length(3),              // Priority
-        Constraint::Length(1),              // Assign to me
-        Constraint::Min(3),                 // Description
-        Constraint::Length(1),              // Submit button
-        Constraint::Length(1),              // Hints
+        Constraint::Length(3),               // Priority
+        Constraint::Length(1),               // Assign to me
+        Constraint::Min(3),                  // Description
+        Constraint::Length(1),               // Submit button
+        Constraint::Length(1),               // Hints
     ])
     .split(inner);
 

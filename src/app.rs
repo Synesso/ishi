@@ -5,12 +5,14 @@ use std::time::Duration;
 /// Compare identifiers like "FOO-123" by prefix lexically, then suffix numerically.
 fn cmp_identifier(a: &str, b: &str) -> Ordering {
     match (a.rsplit_once('-'), b.rsplit_once('-')) {
-        (Some((a_prefix, a_num)), Some((b_prefix, b_num))) => a_prefix
-            .cmp(b_prefix)
-            .then_with(|| match (a_num.parse::<u64>(), b_num.parse::<u64>()) {
-                (Ok(an), Ok(bn)) => an.cmp(&bn),
-                _ => a_num.cmp(b_num),
-            }),
+        (Some((a_prefix, a_num)), Some((b_prefix, b_num))) => {
+            a_prefix.cmp(b_prefix).then_with(|| {
+                match (a_num.parse::<u64>(), b_num.parse::<u64>()) {
+                    (Ok(an), Ok(bn)) => an.cmp(&bn),
+                    _ => a_num.cmp(b_num),
+                }
+            })
+        }
         _ => a.cmp(b),
     }
 }
@@ -1290,9 +1292,9 @@ impl<A: LinearApi> App<A> {
     pub fn add_local_comment(&mut self, issue_id: &str, comment: crate::api::types::IssueComment) {
         for issue in self.issues.iter_mut().chain(self.project_issues.iter_mut()) {
             if issue.id == issue_id {
-                let comments = issue.comments.get_or_insert_with(|| {
-                    crate::api::types::IssueComments { nodes: Vec::new() }
-                });
+                let comments = issue
+                    .comments
+                    .get_or_insert_with(|| crate::api::types::IssueComments { nodes: Vec::new() });
                 comments.nodes.push(comment.clone());
             }
         }
@@ -1372,7 +1374,11 @@ impl<A: LinearApi> App<A> {
     pub fn submit_quick_create(&mut self) -> Option<String> {
         let text = self.quick_create_input.take()?;
         let trimmed = text.trim().to_string();
-        if trimmed.is_empty() { None } else { Some(trimmed) }
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
     }
 
     /// Open the create-issue form pre-populated from AI extraction.
@@ -1515,6 +1521,17 @@ impl<A: LinearApi> App<A> {
         if self.project_selected > 0 {
             self.project_selected -= 1;
         }
+    }
+
+    pub fn project_page_down(&mut self) {
+        let len = self.projects.len();
+        if len > 0 {
+            self.project_selected = (self.project_selected + 20).min(len - 1);
+        }
+    }
+
+    pub fn project_page_up(&mut self) {
+        self.project_selected = self.project_selected.saturating_sub(20);
     }
 
     pub fn project_top(&mut self) {
@@ -2136,7 +2153,7 @@ mod tests {
             labels: None,
             comments: None,
             parent: None,
-                team: None,
+            team: None,
         }];
         assert_eq!(app.issues.len(), 1);
         assert_eq!(app.issues[0].identifier, "JEM-1");
@@ -2267,7 +2284,7 @@ mod tests {
             labels: None,
             comments: None,
             parent: None,
-                team: None,
+            team: None,
         }];
         app.issues = original_issues.clone();
 
@@ -2416,11 +2433,17 @@ mod tests {
     fn workspace_picker_navigation() {
         let mut picker = WorkspacePicker::new(vec!["/a".into(), "/b".into(), "/c".into()]);
         assert_eq!(picker.selected, 0);
-        assert_eq!(picker.options.get(picker.selected).map(|s| s.as_str()), Some("/a"));
+        assert_eq!(
+            picker.options.get(picker.selected).map(|s| s.as_str()),
+            Some("/a")
+        );
 
         picker.move_down();
         assert_eq!(picker.selected, 1);
-        assert_eq!(picker.options.get(picker.selected).map(|s| s.as_str()), Some("/b"));
+        assert_eq!(
+            picker.options.get(picker.selected).map(|s| s.as_str()),
+            Some("/b")
+        );
 
         picker.move_down();
         assert_eq!(picker.selected, 2);
@@ -2448,7 +2471,10 @@ mod tests {
     #[test]
     fn workspace_picker_single_option() {
         let mut picker = WorkspacePicker::new(vec!["/only".into()]);
-        assert_eq!(picker.options.get(picker.selected).map(|s| s.as_str()), Some("/only"));
+        assert_eq!(
+            picker.options.get(picker.selected).map(|s| s.as_str()),
+            Some("/only")
+        );
         picker.move_down();
         assert_eq!(picker.selected, 0);
         picker.move_up();
@@ -2564,6 +2590,20 @@ mod tests {
     }
 
     #[test]
+    fn project_page_navigation_respects_bounds() {
+        let mut app = app_with_projects();
+
+        app.project_page_down();
+        assert_eq!(app.project_selected, 2);
+
+        app.project_page_up();
+        assert_eq!(app.project_selected, 0);
+
+        app.project_page_up();
+        assert_eq!(app.project_selected, 0);
+    }
+
+    #[test]
     fn project_top_goes_to_first() {
         let mut app = app_with_projects();
         app.project_selected = 2;
@@ -2619,7 +2659,7 @@ mod tests {
             labels: None,
             comments: None,
             parent: None,
-                team: None,
+            team: None,
         }];
         app.back_from_project_detail();
         assert!(matches!(app.view, View::ProjectList));
@@ -3093,7 +3133,10 @@ mod tests {
     fn workspace_picker_typing_highlights_selected() {
         let mut picker = WorkspacePicker::new(vec!["/a".into(), "/b".into()]);
         assert!(!picker.typing);
-        assert_eq!(picker.options.get(picker.selected).map(|s| s.as_str()), Some("/a"));
+        assert_eq!(
+            picker.options.get(picker.selected).map(|s| s.as_str()),
+            Some("/a")
+        );
 
         picker.start_typing();
         assert!(picker.typing);
@@ -3254,7 +3297,7 @@ mod tests {
             labels: None,
             comments: None,
             parent: None,
-                team: None,
+            team: None,
         }];
         assert!(app.selected_issue_url().is_none());
     }
@@ -3890,7 +3933,7 @@ mod tests {
             labels: None,
             comments: None,
             parent: None,
-                team: None,
+            team: None,
         }];
         app.select_issue();
         app.detail_session_runs = vec![SessionRunSummary {
@@ -4013,7 +4056,8 @@ mod tests {
             message_count: 1,
             last_activity_ms: 0,
         }];
-        app.output_buffer.push_user_message("T-abc", "Hello from assistant");
+        app.output_buffer
+            .push_user_message("T-abc", "Hello from assistant");
         app
     }
 
@@ -4242,9 +4286,15 @@ mod tests {
         let mut app = app_with_issues();
         app.flash = Some(("Starting thread …".into(), 0));
         app.tick_flash();
-        assert_eq!(app.flash.as_ref().map(|(m, _)| m.as_str()), Some("Starting thread …"));
+        assert_eq!(
+            app.flash.as_ref().map(|(m, _)| m.as_str()),
+            Some("Starting thread …")
+        );
         app.tick_flash();
-        assert_eq!(app.flash.as_ref().map(|(m, _)| m.as_str()), Some("Starting thread …"));
+        assert_eq!(
+            app.flash.as_ref().map(|(m, _)| m.as_str()),
+            Some("Starting thread …")
+        );
     }
 
     #[test]
@@ -4257,13 +4307,14 @@ mod tests {
     #[tokio::test]
     async fn refresh_sets_flash_message() {
         let fake = FakeLinearApi::new();
-        fake.push_response(
-            serde_json::json!({"data": { "issues": { "nodes": [] }}}),
-        );
+        fake.push_response(serde_json::json!({"data": { "issues": { "nodes": [] }}}));
         let mut app = App::new(fake);
         app.refresh().await;
         assert!(app.flash.is_some());
-        assert_eq!(app.flash.as_ref().map(|(m, _)| m.as_str()), Some("Refreshed ✓"));
+        assert_eq!(
+            app.flash.as_ref().map(|(m, _)| m.as_str()),
+            Some("Refreshed ✓")
+        );
     }
 
     #[tokio::test]
@@ -4275,7 +4326,10 @@ mod tests {
         let mut app = App::new(fake);
         app.refresh_projects().await;
         assert!(app.flash.is_some());
-        assert_eq!(app.flash.as_ref().map(|(m, _)| m.as_str()), Some("Refreshed ✓"));
+        assert_eq!(
+            app.flash.as_ref().map(|(m, _)| m.as_str()),
+            Some("Refreshed ✓")
+        );
     }
 
     #[test]
@@ -4412,7 +4466,10 @@ mod tests {
     fn create_issue_form_preselects_project_in_project_detail() {
         let mut app = app_with_projects();
         app.select_project(); // selects "Alpha Project" (p1)
-        let projects = vec![("p1".into(), "Alpha Project".into()), ("p2".into(), "Beta".into())];
+        let projects = vec![
+            ("p1".into(), "Alpha Project".into()),
+            ("p2".into(), "Beta".into()),
+        ];
         app.open_create_issue_form("v".into(), &test_teams(), &projects);
 
         let form = app.create_issue_form.as_ref().unwrap();
@@ -4599,7 +4656,7 @@ mod tests {
 
         let filtered = form.filtered_project_options();
         assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].1 .1, "Beta");
+        assert_eq!(filtered[0].1.1, "Beta");
 
         form.project_type_ahead_push('z');
         let filtered = form.filtered_project_options();

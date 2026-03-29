@@ -56,7 +56,10 @@ pub fn render(frame: &mut Frame, area: Rect, input: &str, loading: bool) {
         .fg(Color::Yellow)
         .add_modifier(Modifier::BOLD);
     let hints = if loading {
-        Line::from(Span::styled("  Analysing with AI …", Style::default().fg(Color::DarkGray)))
+        Line::from(Span::styled(
+            "  Analysing with AI …",
+            Style::default().fg(Color::DarkGray),
+        ))
     } else {
         Line::from(vec![
             Span::styled("Enter", key_style),

@@ -22,7 +22,9 @@ use tokio::sync::mpsc;
 /// Messages sent from background tasks back to the main loop.
 enum BgMessage {
     Error(String),
-    ThreadCreated { issue_identifier: String },
+    ThreadCreated {
+        issue_identifier: String,
+    },
     IssueCreated(crate::api::types::Issue),
     QuickCreateExtracted {
         viewer_id: String,
@@ -33,9 +35,7 @@ enum BgMessage {
 }
 
 enum RunManagementAction {
-    MarkStale {
-        run_id: String,
-    },
+    MarkStale { run_id: String },
 }
 
 fn resolve_run_management_action(
@@ -344,7 +344,9 @@ fn start_new_thread(issue_identifier: &str, workspace: &str, prompt: &str) -> Re
             String::from_utf8_lossy(&new_output.stderr)
         );
     }
-    let thread_id = String::from_utf8_lossy(&new_output.stdout).trim().to_string();
+    let thread_id = String::from_utf8_lossy(&new_output.stdout)
+        .trim()
+        .to_string();
     if thread_id.is_empty() {
         anyhow::bail!("amp threads new returned empty thread ID");
     }
@@ -452,9 +454,7 @@ async fn main() -> Result<()> {
                     extracted,
                 } => {
                     app.refreshing = false;
-                    app.open_create_issue_form_prefilled(
-                        viewer_id, &teams, &projects, &extracted,
-                    );
+                    app.open_create_issue_form_prefilled(viewer_id, &teams, &projects, &extracted);
                 }
             }
         }
@@ -613,8 +613,10 @@ async fn main() -> Result<()> {
                                 .await;
                                 match result {
                                     Ok(Ok(extracted)) => {
-                                        let project_pairs: Vec<(String, String)> =
-                                            projects.iter().map(|p| (p.id.clone(), p.name.clone())).collect();
+                                        let project_pairs: Vec<(String, String)> = projects
+                                            .iter()
+                                            .map(|p| (p.id.clone(), p.name.clone()))
+                                            .collect();
                                         let _ = tx.send(BgMessage::QuickCreateExtracted {
                                             viewer_id,
                                             teams,
@@ -673,31 +675,31 @@ async fn main() -> Result<()> {
                             }
                         } else if focus == app::CreateIssueField::Submit {
                             if let Some(req) = app.submit_create_issue_form() {
-                            let api = app.api.clone();
-                            let tx = bg_tx.clone();
-                            tokio::spawn(async move {
-                                match api
-                                    .create_issue(
-                                        &req.team_id,
-                                        &req.title,
-                                        req.project_id.as_deref(),
-                                        req.priority,
-                                        req.description.as_deref(),
-                                        req.assignee_id.as_deref(),
-                                    )
-                                    .await
-                                {
-                                    Ok(issue) => {
-                                        let _ = tx.send(BgMessage::IssueCreated(issue));
+                                let api = app.api.clone();
+                                let tx = bg_tx.clone();
+                                tokio::spawn(async move {
+                                    match api
+                                        .create_issue(
+                                            &req.team_id,
+                                            &req.title,
+                                            req.project_id.as_deref(),
+                                            req.priority,
+                                            req.description.as_deref(),
+                                            req.assignee_id.as_deref(),
+                                        )
+                                        .await
+                                    {
+                                        Ok(issue) => {
+                                            let _ = tx.send(BgMessage::IssueCreated(issue));
+                                        }
+                                        Err(err) => {
+                                            let _ = tx.send(BgMessage::Error(format!(
+                                                "Failed to create issue: {err}"
+                                            )));
+                                        }
                                     }
-                                    Err(err) => {
-                                        let _ = tx.send(BgMessage::Error(format!(
-                                            "Failed to create issue: {err}"
-                                        )));
-                                    }
-                                }
-                            });
-                            app.flash = Some(("Creating issue …".into(), 0));
+                                });
+                                app.flash = Some(("Creating issue …".into(), 0));
                             }
                         }
                     }
@@ -992,13 +994,11 @@ async fn main() -> Result<()> {
                                     let state = state_name.clone();
                                     tokio::spawn(async move {
                                         // Only apply if the team has this state (for cross-team)
-                                        let should_apply = match api
-                                            .fetch_team_states(&issue_id)
-                                            .await
-                                        {
-                                            Ok(states) => states.iter().any(|s| s == &state),
-                                            Err(_) => false,
-                                        };
+                                        let should_apply =
+                                            match api.fetch_team_states(&issue_id).await {
+                                                Ok(states) => states.iter().any(|s| s == &state),
+                                                Err(_) => false,
+                                            };
                                         if should_apply {
                                             if let Err(err) =
                                                 api.update_issue_state(&issue_id, &state).await
@@ -1017,7 +1017,8 @@ async fn main() -> Result<()> {
                                         }
                                     });
                                 }
-                            } else if let Some((issue_id, identifier, _)) = targets.into_iter().next()
+                            } else if let Some((issue_id, identifier, _)) =
+                                targets.into_iter().next()
                             {
                                 // Single issue: existing path
                                 app.apply_local_state_change(&state_name);
@@ -1050,7 +1051,9 @@ async fn main() -> Result<()> {
                         KeyCode::Char('n') => app.set_project_sort(app::ProjectSortColumn::Name),
                         KeyCode::Char('s') => app.set_project_sort(app::ProjectSortColumn::Status),
                         KeyCode::Char('l') => app.set_project_sort(app::ProjectSortColumn::Lead),
-                        KeyCode::Char('p') => app.set_project_sort(app::ProjectSortColumn::Progress),
+                        KeyCode::Char('p') => {
+                            app.set_project_sort(app::ProjectSortColumn::Progress)
+                        }
                         _ => {}
                     }
                 } else {
@@ -1103,6 +1106,8 @@ async fn main() -> Result<()> {
                         keys::Action::Quit => app.awaiting_quit = true,
                         keys::Action::MoveDown => app.project_move_down(),
                         keys::Action::MoveUp => app.project_move_up(),
+                        keys::Action::PageDown => app.project_page_down(),
+                        keys::Action::PageUp => app.project_page_up(),
                         keys::Action::Top => app.project_top(),
                         keys::Action::Bottom => app.project_bottom(),
                         keys::Action::Select => {
@@ -1150,8 +1155,9 @@ async fn main() -> Result<()> {
                                 match app.api.fetch_team_states(&issue_id).await {
                                     Ok(states) => app.start_state_change(states),
                                     Err(err) => {
-                                        app.error =
-                                            Some(app::AppError::new(format!("Failed to fetch states: {err}")));
+                                        app.error = Some(app::AppError::new(format!(
+                                            "Failed to fetch states: {err}"
+                                        )));
                                     }
                                 }
                             }
@@ -1361,7 +1367,10 @@ async fn main() -> Result<()> {
                                                 app.api.fetch_team_states(&target.0).await
                                             {
                                                 let team_set: std::collections::HashSet<&str> =
-                                                    team_states.iter().map(|s| s.as_str()).collect();
+                                                    team_states
+                                                        .iter()
+                                                        .map(|s| s.as_str())
+                                                        .collect();
                                                 states.retain(|s| team_set.contains(s.as_str()));
                                             }
                                         }
@@ -1379,14 +1388,14 @@ async fn main() -> Result<()> {
                     keys::Action::Copy => {
                         app.load_projects().await;
                         match app.api.fetch_viewer_teams().await {
-                           Ok((viewer_id, teams)) => {
-                               let projects: Vec<(String, String)> = app
-                                   .projects
-                                   .iter()
-                                   .map(|p| (p.id.clone(), p.name.clone()))
-                                   .collect();
-                               app.open_create_issue_form(viewer_id, &teams, &projects);
-                           }
+                            Ok((viewer_id, teams)) => {
+                                let projects: Vec<(String, String)> = app
+                                    .projects
+                                    .iter()
+                                    .map(|p| (p.id.clone(), p.name.clone()))
+                                    .collect();
+                                app.open_create_issue_form(viewer_id, &teams, &projects);
+                            }
                             Err(err) => {
                                 app.error = Some(app::AppError::new(format!(
                                     "Failed to fetch teams: {err}"
@@ -1519,7 +1528,9 @@ mod tests {
                 title: "Parent task".into(),
                 description: Some("Parent description.".into()),
                 url: Some("https://linear.app/issue/JEM-40".into()),
-                state: Some(IssueState { name: "Todo".into() }),
+                state: Some(IssueState {
+                    name: "Todo".into(),
+                }),
                 labels: None,
             })),
             ..minimal_issue()

@@ -29,8 +29,12 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         return;
     }
 
-    let show_bar =
-        app.refreshing || app.awaiting_quit || app.awaiting_sort || app.awaiting_state_change || app.error.is_some() || app.flash.is_some();
+    let show_bar = app.refreshing
+        || app.awaiting_quit
+        || app.awaiting_sort
+        || app.awaiting_state_change
+        || app.error.is_some()
+        || app.flash.is_some();
     let chunks = if show_bar {
         Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area)
     } else {
@@ -87,7 +91,12 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         None => String::new(),
     };
 
-    let title = format!("{} — Issues ({}){}", project_name, issues.len(), sort_indicator);
+    let title = format!(
+        "{} — Issues ({}){}",
+        project_name,
+        issues.len(),
+        sort_indicator
+    );
 
     let table = Table::new(
         rows,

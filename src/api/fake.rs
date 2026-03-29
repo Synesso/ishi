@@ -69,7 +69,9 @@ impl LinearApi for FakeLinearApi {
             }
             let issues: Vec<Issue> = serde_json::from_value(nodes.clone())?;
             all_issues.extend(issues);
-            let has_next = connection["pageInfo"]["hasNextPage"].as_bool().unwrap_or(false);
+            let has_next = connection["pageInfo"]["hasNextPage"]
+                .as_bool()
+                .unwrap_or(false);
             if !has_next {
                 break;
             }
@@ -102,7 +104,9 @@ impl LinearApi for FakeLinearApi {
             }
             let issues: Vec<Issue> = serde_json::from_value(nodes.clone())?;
             all_issues.extend(issues);
-            let has_next = connection["pageInfo"]["hasNextPage"].as_bool().unwrap_or(false);
+            let has_next = connection["pageInfo"]["hasNextPage"]
+                .as_bool()
+                .unwrap_or(false);
             if !has_next {
                 break;
             }

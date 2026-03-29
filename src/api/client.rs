@@ -304,11 +304,15 @@ impl LinearApi for LinearClient {
             let connection = &resp["data"]["viewer"]["assignedIssues"];
             let issues: Vec<Issue> = serde_json::from_value(connection["nodes"].clone())?;
             all_issues.extend(issues);
-            let has_next = connection["pageInfo"]["hasNextPage"].as_bool().unwrap_or(false);
+            let has_next = connection["pageInfo"]["hasNextPage"]
+                .as_bool()
+                .unwrap_or(false);
             if !has_next {
                 break;
             }
-            cursor = connection["pageInfo"]["endCursor"].as_str().map(String::from);
+            cursor = connection["pageInfo"]["endCursor"]
+                .as_str()
+                .map(String::from);
         }
         Ok(all_issues)
     }
@@ -359,11 +363,15 @@ impl LinearApi for LinearClient {
             let connection = &resp["data"]["project"]["issues"];
             let issues: Vec<Issue> = serde_json::from_value(connection["nodes"].clone())?;
             all_issues.extend(issues);
-            let has_next = connection["pageInfo"]["hasNextPage"].as_bool().unwrap_or(false);
+            let has_next = connection["pageInfo"]["hasNextPage"]
+                .as_bool()
+                .unwrap_or(false);
             if !has_next {
                 break;
             }
-            cursor = connection["pageInfo"]["endCursor"].as_str().map(String::from);
+            cursor = connection["pageInfo"]["endCursor"]
+                .as_str()
+                .map(String::from);
         }
         Ok(all_issues)
     }
@@ -384,7 +392,8 @@ impl LinearApi for LinearClient {
                 Some((name, position))
             })
             .collect();
-        state_entries.sort_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        state_entries
+            .sort_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         Ok(state_entries.into_iter().map(|(name, _)| name).collect())
     }

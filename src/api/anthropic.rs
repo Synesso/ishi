@@ -79,7 +79,10 @@ pub fn extract_issue_from_text(
 
     Ok(ExtractedIssue {
         title: parsed["title"].as_str().unwrap_or_default().to_string(),
-        description: parsed["description"].as_str().unwrap_or_default().to_string(),
+        description: parsed["description"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
         team_name: parsed["team"].as_str().map(String::from),
         project_name: parsed["project"].as_str().map(String::from),
         priority: parsed["priority"].as_str().map(String::from),

@@ -429,7 +429,10 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
             spans.push(Span::styled("x", key_style));
             spans.push(Span::raw(" stale"));
         }
-        if app.selected_thread().is_some_and(|t| app.output_buffer.line_count(&t.id) > 0) {
+        if app
+            .selected_thread()
+            .is_some_and(|t| app.output_buffer.line_count(&t.id) > 0)
+        {
             spans.push(Span::raw("  "));
             spans.push(Span::styled("o", key_style));
             spans.push(Span::raw(" output"));
@@ -560,11 +563,7 @@ fn priority_style(priority: &str) -> Style {
 }
 
 fn render_run_log<A: LinearApi>(frame: &mut Frame, area: Rect, app: &mut App<A>) {
-    let chunks = Layout::vertical([
-        Constraint::Min(0),
-        Constraint::Length(1),
-    ])
-    .split(area);
+    let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
 
     let log_lines: Vec<Line> = app
         .run_log_lines

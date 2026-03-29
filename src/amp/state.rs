@@ -277,7 +277,10 @@ mod tests {
 
         assert_eq!(state.thread_links.len(), 1);
         assert_eq!(
-            state.thread_links.get("T-abc").map(|l| l.workspace.as_str()),
+            state
+                .thread_links
+                .get("T-abc")
+                .map(|l| l.workspace.as_str()),
             Some("/new/path")
         );
     }
@@ -340,7 +343,10 @@ mod tests {
         );
 
         assert_eq!(state.session_runs.len(), 1);
-        assert_eq!(state.session_runs.get("run-1").and_then(|r| r.pid), Some(222));
+        assert_eq!(
+            state.session_runs.get("run-1").and_then(|r| r.pid),
+            Some(222)
+        );
         assert_eq!(
             state.session_runs.get("run-1").map(|r| r.status),
             Some(SessionRunStatus::Running)
@@ -386,7 +392,10 @@ mod tests {
 
         let loaded = State::load(&path).unwrap();
         assert_eq!(
-            loaded.thread_links.get("T-abc").map(|l| l.workspace.as_str()),
+            loaded
+                .thread_links
+                .get("T-abc")
+                .map(|l| l.workspace.as_str()),
             Some("/workspace/dir")
         );
         let threads = loaded.threads_for_issue("JEM-1");
