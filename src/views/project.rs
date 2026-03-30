@@ -54,27 +54,49 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
 
     let rows: Vec<Row> = issues
         .iter()
-        .map(|issue| {
+        .enumerate()
+        .map(|(idx, issue)| {
+            let is_multi_selected = app.selected_indices.contains(&idx);
+            let base_style = if is_multi_selected {
+                Style::default().fg(Color::Cyan)
+            } else {
+                Style::default()
+            };
             let thread_display = app.thread_count_display(&issue.identifier);
             let thread_style = if thread_display.contains('/') {
                 Style::default().fg(Color::Green)
             } else if thread_display == "-" {
                 Style::default().fg(Color::DarkGray)
             } else {
-                Style::default()
+                base_style
             };
+            let select_marker = if is_multi_selected { "▌ " } else { "  " };
             Row::new(vec![
-                Cell::from(issue.identifier.as_str()),
-                Cell::from(issue.title.as_str()),
+                Cell::from(Line::from(vec![
+                    Span::styled(select_marker, base_style),
+                    Span::styled(issue.identifier.as_str(), base_style),
+                ])),
+                Cell::from(Span::styled(issue.title.as_str(), base_style)),
                 Cell::from(Span::styled(
                     issue.status_str(),
-                    status_style(issue.status_str()),
+                    if is_multi_selected {
+                        base_style
+                    } else {
+                        status_style(issue.status_str())
+                    },
                 )),
                 Cell::from(Span::styled(
                     issue.priority_str(),
-                    priority_style(issue.priority_str()),
+                    if is_multi_selected {
+                        base_style
+                    } else {
+                        priority_style(issue.priority_str())
+                    },
                 )),
-                Cell::from(issue.assignee.as_ref().map_or("—", |a| a.name.as_str())),
+                Cell::from(Span::styled(
+                    issue.assignee.as_ref().map_or("—", |a| a.name.as_str()),
+                    base_style,
+                )),
                 Cell::from(Span::styled(thread_display, thread_style)),
             ])
         })
@@ -92,10 +114,15 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
     };
 
     let title = format!(
-        "{} — Issues ({}){}",
+        "{} — Issues ({}){}{}",
         project_name,
         issues.len(),
-        sort_indicator
+        sort_indicator,
+        if app.selected_indices.len() > 1 {
+            format!(" [{} selected]", app.selected_indices.len())
+        } else {
+            String::new()
+        }
     );
 
     let table = Table::new(

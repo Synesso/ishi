@@ -110,6 +110,16 @@ mutation($issueId: String!, $stateId: String!) {
 }
 "#;
 
+const UPDATE_ISSUE_ASSIGNEE_MUTATION: &str = r#"
+mutation($issueId: String!, $assigneeId: String!) {
+  issueUpdate(id: $issueId, input: { assigneeId: $assigneeId }) {
+    issue {
+      assignee { name }
+    }
+  }
+}
+"#;
+
 const CREATE_COMMENT_MUTATION: &str = r#"
 mutation($issueId: String!, $body: String!) {
   commentCreate(input: { issueId: $issueId, body: $body }) {
@@ -234,6 +244,12 @@ pub trait LinearApi: Send + Sync {
         &self,
         issue_id: &str,
         state_name: &str,
+    ) -> impl std::future::Future<Output = Result<String>> + Send;
+
+    fn update_issue_assignee(
+        &self,
+        issue_id: &str,
+        assignee_id: &str,
     ) -> impl std::future::Future<Output = Result<String>> + Send;
 
     fn create_comment(
@@ -418,6 +434,18 @@ impl LinearApi for LinearClient {
             .unwrap_or(state_name)
             .to_string();
         Ok(new_state)
+    }
+
+    async fn update_issue_assignee(&self, issue_id: &str, assignee_id: &str) -> Result<String> {
+        let vars = serde_json::json!({ "issueId": issue_id, "assigneeId": assignee_id });
+        let resp = self
+            .query(UPDATE_ISSUE_ASSIGNEE_MUTATION, Some(vars))
+            .await?;
+        let assignee_name = resp["data"]["issueUpdate"]["issue"]["assignee"]["name"]
+            .as_str()
+            .unwrap_or("You")
+            .to_string();
+        Ok(assignee_name)
     }
 
     async fn create_comment(

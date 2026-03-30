@@ -120,6 +120,48 @@ async fn refresh_all(app: &mut App<impl LinearApi>) {
     }
 }
 
+async fn assign_target_issues_to_me<A>(app: &mut App<A>, bg_tx: mpsc::UnboundedSender<BgMessage>)
+where
+    A: LinearApi + Clone + 'static,
+{
+    let targets = app.target_issues();
+    if targets.is_empty() {
+        return;
+    }
+
+    let (viewer_id, _) = match app.api.fetch_viewer_teams().await {
+        Ok(viewer) => viewer,
+        Err(err) => {
+            app.error = Some(app::AppError::new(format!("Failed to fetch viewer: {err}")));
+            return;
+        }
+    };
+
+    let issue_ids: Vec<String> = targets.iter().map(|(id, _, _)| id.clone()).collect();
+    if issue_ids.len() > 1 {
+        app.apply_local_assignment_multi(&issue_ids, "You");
+        app.flash = Some((format!("Assigned {} issues to you ✓", issue_ids.len()), 30));
+    } else {
+        app.apply_local_assignment("You");
+        app.flash = Some((format!("{} assigned to you ✓", targets[0].1), 30));
+    }
+    app.selected_indices.clear();
+
+    for (issue_id, identifier, _) in targets {
+        let api = app.api.clone();
+        let tx = bg_tx.clone();
+        let viewer_id = viewer_id.clone();
+        tokio::spawn(async move {
+            if let Err(err) = api.update_issue_assignee(&issue_id, &viewer_id).await {
+                let _ = tx.send(BgMessage::Error(format!(
+                    "Failed to assign {}: {}",
+                    identifier, err
+                )));
+            }
+        });
+    }
+}
+
 fn load_threads_for_issue(app: &mut App<impl LinearApi>, identifier: &str) {
     let state_path = match amp::state::state_path() {
         Ok(p) => p,
@@ -1151,6 +1193,8 @@ async fn main() -> Result<()> {
                         keys::Action::Quit => app.awaiting_quit = true,
                         keys::Action::MoveDown => app.project_issue_move_down(),
                         keys::Action::MoveUp => app.project_issue_move_up(),
+                        keys::Action::SelectDown => app.project_issue_select_down(),
+                        keys::Action::SelectUp => app.project_issue_select_up(),
                         keys::Action::PageDown => app.project_issue_page_down(),
                         keys::Action::PageUp => app.project_issue_page_up(),
                         keys::Action::Top => app.project_issue_top(),
@@ -1169,10 +1213,33 @@ async fn main() -> Result<()> {
                         keys::Action::Help => app.toggle_help(),
                         keys::Action::OpenIn => app.awaiting_open = true,
                         keys::Action::ChangeState => {
-                            if let Some(issue) = app.context_issue() {
-                                let issue_id = issue.id.clone();
-                                match app.api.fetch_team_states(&issue_id).await {
-                                    Ok(states) => app.start_state_change(states),
+                            let targets = app.target_issues();
+                            if !targets.is_empty() {
+                                let first_id = targets[0].0.clone();
+                                match app.api.fetch_team_states(&first_id).await {
+                                    Ok(mut states) => {
+                                        let mut seen_teams = std::collections::HashSet::new();
+                                        if let Some(ref t) = targets[0].2 {
+                                            seen_teams.insert(t.clone());
+                                        }
+                                        for target in &targets[1..] {
+                                            let team_name = target.2.as_deref().unwrap_or("");
+                                            if seen_teams.insert(team_name.to_string()) {
+                                                if let Ok(team_states) =
+                                                    app.api.fetch_team_states(&target.0).await
+                                                {
+                                                    let team_set: std::collections::HashSet<&str> =
+                                                        team_states
+                                                            .iter()
+                                                            .map(|s| s.as_str())
+                                                            .collect();
+                                                    states
+                                                        .retain(|s| team_set.contains(s.as_str()));
+                                                }
+                                            }
+                                        }
+                                        app.start_state_change(states);
+                                    }
                                     Err(err) => {
                                         app.error = Some(app::AppError::new(format!(
                                             "Failed to fetch states: {err}"
@@ -1198,6 +1265,9 @@ async fn main() -> Result<()> {
                                     )));
                                 }
                             }
+                        }
+                        keys::Action::SendInstruction => {
+                            assign_target_issues_to_me(&mut app, bg_tx.clone()).await;
                         }
                         keys::Action::QuickCreate => app.open_quick_create(),
                         _ => {}
@@ -1421,6 +1491,9 @@ async fn main() -> Result<()> {
                                 )));
                             }
                         }
+                    }
+                    keys::Action::SendInstruction => {
+                        assign_target_issues_to_me(&mut app, bg_tx.clone()).await;
                     }
                     keys::Action::QuickCreate => app.open_quick_create(),
                     _ => {}

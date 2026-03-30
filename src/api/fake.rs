@@ -133,6 +133,13 @@ impl LinearApi for FakeLinearApi {
         Ok(state_name.to_string())
     }
 
+    async fn update_issue_assignee(&self, _issue_id: &str, _assignee_id: &str) -> Result<String> {
+        if let Some(err_msg) = self.errors.lock().unwrap().pop_front() {
+            return Err(anyhow::anyhow!("{}", err_msg));
+        }
+        Ok("You".to_string())
+    }
+
     async fn create_comment(
         &self,
         _issue_id: &str,

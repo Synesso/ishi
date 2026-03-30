@@ -1531,10 +1531,12 @@ impl<A: LinearApi> App<A> {
     }
 
     pub fn switch_to_projects(&mut self) {
+        self.selected_indices.clear();
         self.view = View::ProjectList;
     }
 
     pub fn switch_to_my_issues(&mut self) {
+        self.selected_indices.clear();
         self.view = View::MyIssues;
     }
 
@@ -1591,18 +1593,21 @@ impl<A: LinearApi> App<A> {
 
     pub fn select_project(&mut self) {
         if self.selected_project().is_some() {
+            self.selected_indices.clear();
             self.view = View::ProjectDetail;
             self.project_issue_selected = 0;
         }
     }
 
     pub fn back_from_project_detail(&mut self) {
+        self.selected_indices.clear();
         self.view = View::ProjectList;
         self.project_issues.clear();
         self.project_issue_selected = 0;
     }
 
     pub fn project_issue_move_down(&mut self) {
+        self.selected_indices.clear();
         let len = self.filtered_project_issues().len();
         if len > 0 && self.project_issue_selected < len - 1 {
             self.project_issue_selected += 1;
@@ -1610,12 +1615,38 @@ impl<A: LinearApi> App<A> {
     }
 
     pub fn project_issue_move_up(&mut self) {
+        self.selected_indices.clear();
         if self.project_issue_selected > 0 {
             self.project_issue_selected -= 1;
         }
     }
 
+    pub fn project_issue_select_down(&mut self) {
+        let len = self.filtered_project_issues().len();
+        if len == 0 {
+            return;
+        }
+        self.selected_indices.insert(self.project_issue_selected);
+        if self.project_issue_selected < len - 1 {
+            self.project_issue_selected += 1;
+            self.selected_indices.insert(self.project_issue_selected);
+        }
+    }
+
+    pub fn project_issue_select_up(&mut self) {
+        let len = self.filtered_project_issues().len();
+        if len == 0 {
+            return;
+        }
+        self.selected_indices.insert(self.project_issue_selected);
+        if self.project_issue_selected > 0 {
+            self.project_issue_selected -= 1;
+            self.selected_indices.insert(self.project_issue_selected);
+        }
+    }
+
     pub fn project_issue_page_down(&mut self) {
+        self.selected_indices.clear();
         let len = self.filtered_project_issues().len();
         if len > 0 {
             self.project_issue_selected = (self.project_issue_selected + 20).min(len - 1);
@@ -1623,14 +1654,17 @@ impl<A: LinearApi> App<A> {
     }
 
     pub fn project_issue_page_up(&mut self) {
+        self.selected_indices.clear();
         self.project_issue_selected = self.project_issue_selected.saturating_sub(20);
     }
 
     pub fn project_issue_top(&mut self) {
+        self.selected_indices.clear();
         self.project_issue_selected = 0;
     }
 
     pub fn project_issue_bottom(&mut self) {
+        self.selected_indices.clear();
         let len = self.filtered_project_issues().len();
         if len > 0 {
             self.project_issue_selected = len - 1;
@@ -1767,7 +1801,13 @@ impl<A: LinearApi> App<A> {
                 })
                 .unwrap_or_default();
         }
-        let issues = self.filtered_issues();
+        let issues = match self.view {
+            View::ProjectDetail => self.filtered_project_issues(),
+            View::Detail if self.detail_origin == DetailOrigin::ProjectDetail => {
+                self.filtered_project_issues()
+            }
+            _ => self.filtered_issues(),
+        };
         self.selected_indices
             .iter()
             .filter_map(|&idx| issues.get(idx))
@@ -1792,6 +1832,33 @@ impl<A: LinearApi> App<A> {
             if let Some(issue) = self.project_issues.iter_mut().find(|i| &i.id == issue_id) {
                 issue.state = Some(crate::api::types::IssueState {
                     name: new_state.to_string(),
+                });
+            }
+        }
+        self.cache.invalidate(CACHE_KEY_MY_ISSUES);
+        self.project_cache.invalidate(CACHE_KEY_PROJECTS);
+    }
+
+    /// Apply an assignee change to the currently selected issue in local data.
+    pub fn apply_local_assignment(&mut self, assignee_name: &str) {
+        if let Some(issue) = self.context_issue() {
+            let issue_id = issue.id.clone();
+            self.apply_local_assignment_multi(&[issue_id], assignee_name);
+        }
+    }
+
+    /// Apply an assignee change to multiple issues locally.
+    pub fn apply_local_assignment_multi(&mut self, issue_ids: &[String], assignee_name: &str) {
+        let assignee_name = assignee_name.to_string();
+        for issue_id in issue_ids {
+            if let Some(issue) = self.issues.iter_mut().find(|i| &i.id == issue_id) {
+                issue.assignee = Some(crate::api::types::IssueUser {
+                    name: assignee_name.clone(),
+                });
+            }
+            if let Some(issue) = self.project_issues.iter_mut().find(|i| &i.id == issue_id) {
+                issue.assignee = Some(crate::api::types::IssueUser {
+                    name: assignee_name.clone(),
                 });
             }
         }
@@ -1831,6 +1898,7 @@ impl<A: LinearApi> App<A> {
             match self.api.fetch_project_issues(&project_id).await {
                 Ok(issues) => {
                     self.error = None;
+                    self.selected_indices.clear();
                     self.project_issues = issues;
                     self.project_issue_selected = 0;
                 }
@@ -2801,6 +2869,37 @@ mod tests {
         assert_eq!(app.project_issue_selected, 0);
         app.project_issue_move_up(); // at start
         assert_eq!(app.project_issue_selected, 0);
+    }
+
+    #[test]
+    fn project_issue_select_down_adds_indices() {
+        let mut app = app_with_project_issues();
+        assert!(app.selected_indices.is_empty());
+        app.project_issue_select_down();
+        assert_eq!(app.selected_indices.len(), 2);
+        assert!(app.selected_indices.contains(&0));
+        assert!(app.selected_indices.contains(&1));
+        assert_eq!(app.project_issue_selected, 1);
+    }
+
+    #[test]
+    fn project_issue_select_up_adds_indices() {
+        let mut app = app_with_project_issues();
+        app.project_issue_selected = 1;
+        app.project_issue_select_up();
+        assert_eq!(app.selected_indices.len(), 2);
+        assert!(app.selected_indices.contains(&0));
+        assert!(app.selected_indices.contains(&1));
+        assert_eq!(app.project_issue_selected, 0);
+    }
+
+    #[test]
+    fn project_issue_move_down_clears_selection() {
+        let mut app = app_with_project_issues();
+        app.project_issue_select_down();
+        assert!(!app.selected_indices.is_empty());
+        app.project_issue_move_down();
+        assert!(app.selected_indices.is_empty());
     }
 
     #[test]
@@ -4123,6 +4222,32 @@ mod tests {
     }
 
     #[test]
+    fn apply_local_assignment_updates_my_issues() {
+        let mut app = app_with_issues();
+        app.selected = 0;
+        app.apply_local_assignment("You");
+        assert_eq!(
+            app.issues[0].assignee.as_ref().map(|a| a.name.as_str()),
+            Some("You")
+        );
+    }
+
+    #[test]
+    fn apply_local_assignment_updates_project_issues() {
+        let mut app = app_with_project_issues();
+        app.project_issue_selected = 0;
+        app.view = View::ProjectDetail;
+        app.apply_local_assignment("You");
+        assert_eq!(
+            app.project_issues[0]
+                .assignee
+                .as_ref()
+                .map(|a| a.name.as_str()),
+            Some("You")
+        );
+    }
+
+    #[test]
     fn start_state_change_defaults_to_current_state() {
         let mut app = app_with_issues();
         // Give the first issue an "In Progress" state
@@ -4874,6 +4999,16 @@ mod tests {
     }
 
     #[test]
+    fn target_issues_returns_project_multi_when_selected() {
+        let mut app = app_with_project_issues();
+        app.project_issue_select_down();
+        let targets = app.target_issues();
+        assert_eq!(targets.len(), 2);
+        assert_eq!(targets[0].1, "JEM-10");
+        assert_eq!(targets[1].1, "JEM-11");
+    }
+
+    #[test]
     fn apply_local_state_change_multi_updates_all() {
         let mut app = app_with_issues();
         let ids = vec!["1".to_string(), "3".to_string()];
@@ -4881,6 +5016,27 @@ mod tests {
         assert_eq!(app.issues[0].status_str(), "Done");
         assert_eq!(app.issues[1].status_str(), "—"); // JEM-2 unchanged
         assert_eq!(app.issues[2].status_str(), "Done");
+    }
+
+    #[test]
+    fn apply_local_assignment_multi_updates_all() {
+        let mut app = app_with_project_issues();
+        let ids = vec!["10".to_string(), "11".to_string()];
+        app.apply_local_assignment_multi(&ids, "You");
+        assert_eq!(
+            app.project_issues[0]
+                .assignee
+                .as_ref()
+                .map(|a| a.name.as_str()),
+            Some("You")
+        );
+        assert_eq!(
+            app.project_issues[1]
+                .assignee
+                .as_ref()
+                .map(|a| a.name.as_str()),
+            Some("You")
+        );
     }
 
     #[test]
