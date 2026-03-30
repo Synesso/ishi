@@ -29,17 +29,7 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         return;
     }
 
-    let show_bar = app.refreshing
-        || app.awaiting_quit
-        || app.awaiting_sort
-        || app.awaiting_state_change
-        || app.error.is_some()
-        || app.flash.is_some();
-    let chunks = if show_bar {
-        Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area)
-    } else {
-        Layout::vertical([Constraint::Min(0)]).split(area)
-    };
+    let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
 
     let header = Row::new(vec![
         Cell::from("ID").style(Style::default().add_modifier(Modifier::BOLD)),
@@ -151,78 +141,108 @@ pub fn render<A: LinearApi>(frame: &mut Frame, area: Rect, app: &App<A>) {
         .fg(Color::Yellow)
         .add_modifier(Modifier::BOLD);
 
-    if show_bar {
-        if let Some(ref err) = app.error {
-            let line = Line::from(vec![
-                Span::styled(
-                    "Error: ",
-                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(&err.message, Style::default().fg(Color::Red)),
-                Span::styled(
-                    " (press Esc to dismiss)",
-                    Style::default().fg(Color::DarkGray),
-                ),
-            ]);
-            frame.render_widget(Paragraph::new(line), chunks[1]);
-        } else if app.refreshing {
-            let line = Line::from(Span::styled(
-                "Refreshing...",
-                Style::default().fg(Color::Yellow),
+    if let Some(ref err) = app.error {
+        let line = Line::from(vec![
+            Span::styled(
+                "Error: ",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(&err.message, Style::default().fg(Color::Red)),
+            Span::styled(
+                " (press Esc to dismiss)",
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]);
+        frame.render_widget(Paragraph::new(line), chunks[1]);
+    } else if app.refreshing {
+        let line = Line::from(Span::styled(
+            "Refreshing...",
+            Style::default().fg(Color::Yellow),
+        ));
+        frame.render_widget(Paragraph::new(line), chunks[1]);
+    } else if let Some((ref msg, _)) = app.flash {
+        let line = Line::from(Span::styled(
+            msg.as_str(),
+            Style::default().fg(Color::Green),
+        ));
+        frame.render_widget(Paragraph::new(line), chunks[1]);
+    } else if app.awaiting_open {
+        let line = Line::from(vec![
+            Span::raw("open in: "),
+            Span::styled("l", key_style),
+            Span::raw("inear  "),
+            Span::styled("g", key_style),
+            Span::raw("ithub PR"),
+        ]);
+        frame.render_widget(Paragraph::new(line), chunks[1]);
+    } else if app.awaiting_state_change {
+        let mut spans = vec![Span::raw("move to: ")];
+        if !app.state_type_ahead.is_empty() {
+            spans.push(Span::styled(
+                format!("[{}] ", app.state_type_ahead),
+                Style::default().fg(Color::Cyan),
             ));
-            frame.render_widget(Paragraph::new(line), chunks[1]);
-        } else if let Some((ref msg, _)) = app.flash {
-            let line = Line::from(Span::styled(
-                msg.as_str(),
-                Style::default().fg(Color::Green),
-            ));
-            frame.render_widget(Paragraph::new(line), chunks[1]);
-        } else if app.awaiting_state_change {
-            let mut spans = vec![Span::raw("move to: ")];
-            if !app.state_type_ahead.is_empty() {
-                spans.push(Span::styled(
-                    format!("[{}] ", app.state_type_ahead),
-                    Style::default().fg(Color::Cyan),
-                ));
-            }
-            for (i, state) in app.state_options.iter().enumerate() {
-                if i == app.state_selected {
-                    spans.push(Span::styled(
-                        state.as_str(),
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
-                    ));
-                } else {
-                    spans.push(Span::raw(state.as_str()));
-                }
-                if i < app.state_options.len() - 1 {
-                    spans.push(Span::raw("  "));
-                }
-            }
-            frame.render_widget(Paragraph::new(Line::from(spans)), chunks[1]);
-        } else if app.awaiting_sort {
-            let column_hints = vec![
-                Span::styled("i", key_style),
-                Span::raw("d  "),
-                Span::styled("t", key_style),
-                Span::raw("itle  "),
-                Span::styled("s", key_style),
-                Span::raw("tatus  p"),
-                Span::styled("r", key_style),
-                Span::raw("iority"),
-            ];
-            let mut spans = vec![Span::raw("sort by: ")];
-            spans.extend(column_hints);
-            frame.render_widget(Paragraph::new(Line::from(spans)), chunks[1]);
-        } else if app.awaiting_quit {
-            let line = Line::from(vec![
-                Span::raw("Press "),
-                Span::styled("q", key_style),
-                Span::raw(" again to quit"),
-            ]);
-            frame.render_widget(Paragraph::new(line), chunks[1]);
         }
+        for (i, state) in app.state_options.iter().enumerate() {
+            if i == app.state_selected {
+                spans.push(Span::styled(
+                    state.as_str(),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            } else {
+                spans.push(Span::raw(state.as_str()));
+            }
+            if i < app.state_options.len() - 1 {
+                spans.push(Span::raw("  "));
+            }
+        }
+        frame.render_widget(Paragraph::new(Line::from(spans)), chunks[1]);
+    } else if app.awaiting_sort {
+        let column_hints = vec![
+            Span::styled("i", key_style),
+            Span::raw("d  "),
+            Span::styled("t", key_style),
+            Span::raw("itle  "),
+            Span::styled("s", key_style),
+            Span::raw("tatus  p"),
+            Span::styled("r", key_style),
+            Span::raw("iority"),
+        ];
+        let mut spans = vec![Span::raw("sort by: ")];
+        spans.extend(column_hints);
+        frame.render_widget(Paragraph::new(Line::from(spans)), chunks[1]);
+    } else if app.awaiting_quit {
+        let line = Line::from(vec![
+            Span::raw("Press "),
+            Span::styled("q", key_style),
+            Span::raw(" again to quit"),
+        ]);
+        frame.render_widget(Paragraph::new(line), chunks[1]);
+    } else {
+        let sep = Span::styled(" │ ", Style::default().fg(Color::DarkGray));
+        let line = Line::from(vec![
+            Span::styled("s", key_style),
+            Span::raw("ort  "),
+            Span::styled("i", key_style),
+            Span::raw(" assign  "),
+            Span::styled("o", key_style),
+            Span::raw("pen  "),
+            Span::styled("m", key_style),
+            Span::raw("ove  "),
+            Span::styled("r", key_style),
+            Span::raw("efresh"),
+            sep.clone(),
+            Span::styled("Esc", key_style),
+            Span::raw(" back  "),
+            Span::styled("?", key_style),
+            Span::raw("help"),
+            sep,
+            Span::styled("Enter", key_style),
+            Span::raw(" open"),
+        ]);
+        frame.render_widget(Paragraph::new(line), chunks[1]);
     }
 }
 

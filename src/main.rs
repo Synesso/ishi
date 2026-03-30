@@ -1211,6 +1211,7 @@ async fn main() -> Result<()> {
                             app.load_project_issues().await;
                         }
                         keys::Action::Help => app.toggle_help(),
+                        keys::Action::OrderBy => app.awaiting_sort = true,
                         keys::Action::OpenIn => app.awaiting_open = true,
                         keys::Action::ChangeState => {
                             let targets = app.target_issues();

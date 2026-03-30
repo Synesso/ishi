@@ -3123,6 +3123,28 @@ mod tests {
     }
 
     #[test]
+    fn filtered_project_issues_respect_issue_sort() {
+        let mut app = app_with_project_issues();
+
+        app.set_sort(SortColumn::Title);
+        app.set_sort(SortColumn::Title);
+
+        let issues = app.filtered_project_issues();
+        assert_eq!(issues[0].identifier, "JEM-11");
+        assert_eq!(issues[1].identifier, "JEM-10");
+    }
+
+    #[test]
+    fn set_sort_resets_project_issue_cursor() {
+        let mut app = app_with_project_issues();
+        app.project_issue_selected = 1;
+
+        app.set_sort(SortColumn::Identifier);
+
+        assert_eq!(app.project_issue_selected, 0);
+    }
+
+    #[test]
     fn select_project_issue_enters_detail_view() {
         let mut app = app_with_project_issues();
         app.project_issue_selected = 0;
